@@ -534,6 +534,13 @@ ${listado}`;
               Panel de control · Taller & Pañol · Corre 100% local en tu navegador
             </p>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <img
+              src="/logo-auditor.png"
+              alt="Logo"
+              className="h-9 w-auto object-contain opacity-90"
+            />
+          </div>
           <div className="flex items-center gap-2">
             {tarFileName && <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 text-[10px] font-mono">Tareas ✓</Badge>}
             {matFileName && <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 text-[10px] font-mono">Materiales ✓</Badge>}
