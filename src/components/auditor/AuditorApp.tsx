@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import Papa from 'papaparse';
 import ExcelJS from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,11 +20,14 @@ import {
   Upload, FileSpreadsheet, Download, Wrench, Bot, Brain,
   AlertTriangle, XCircle, CheckCircle2, Warehouse, BarChart3,
   ChevronRight, Loader2, Trash2, BookOpen, Lightbulb, Search,
-  Sparkles, Shield, Zap
+  Sparkles, Shield, Zap, ClipboardList, ShoppingCart
 } from 'lucide-react';
-import type { TareaRow, MaterialRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
+import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
 import { runAudit, up } from '@/lib/audit-engine';
 import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
+import { parseTabularFile, esc, thinBorder } from './shared-utils';
+import OVTab from './OVTab';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
 
@@ -38,47 +40,7 @@ function saveCustomDict(dict: Record<string, string[]>) {
   try { localStorage.setItem(CUSTOM_DICT_KEY, JSON.stringify(dict)); } catch { /* noop */ }
 }
 
-async function parseTabularFile(file: File): Promise<Record<string, unknown>[]> {
-  const name = file.name.toLowerCase();
-  if (name.endsWith('.csv')) {
-    const text = await file.text();
-    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: true });
-    return parsed.data as Record<string, unknown>[];
-  } else {
-    const buf = await file.arrayBuffer();
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
-    const ws = wb.worksheets[0];
-    const rows: Record<string, unknown>[] = [];
-    let headers: string[] = [];
-    ws.eachRow((row, rowNumber) => {
-      const values = row.values.slice(1);
-      if (rowNumber === 1) {
-        headers = values.map(v => (v === undefined || v === null) ? '' : String(v).trim());
-      } else {
-        const obj: Record<string, unknown> = {};
-        headers.forEach((h, i) => {
-          let v = values[i];
-          if (v && typeof v === 'object' && 'text' in (v as object)) v = (v as { text: unknown }).text;
-          if (v && typeof v === 'object' && 'result' in (v as object)) v = (v as { result: unknown }).result;
-          obj[h] = v === undefined ? null : v;
-        });
-        rows.push(obj);
-      }
-    });
-    return rows;
-  }
-}
 
-function esc(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-}
-
-function thinBorder() {
-  const side = { style: 'thin' as const, color: { argb: 'FFD9D9D9' } };
-  return { top: side, bottom: side, left: side, right: side };
-}
 
 /* =================== ANIMATED BACKGROUND =================== */
 
@@ -227,6 +189,18 @@ function MetricCard({ count, label, breakdown, hasWarehouse, icon, bgGlow, barCo
               </div>
             </>
           )}
+          {breakdown.tiposOrden && breakdown.tiposOrden.length > 0 && (
+            <>
+              <p className="text-[10px] uppercase tracking-[0.15em] text-slate-500/80 font-bold mb-2 mt-3">Por tipo de OM</p>
+              <div className="flex flex-wrap gap-1.5">
+                {breakdown.tiposOrden.map(t => (
+                  <Badge key={t.name} variant="outline" className="text-[10px] font-mono border-violet-500/25 text-violet-300 bg-violet-500/[0.07]">
+                    {t.name} <span className="text-violet-400/70 ml-1">{t.count}</span>
+                  </Badge>
+                ))}
+              </div>
+            </>
+          )}
           {!hasWarehouse && count > 0 && (
             <p className="text-xs text-slate-600 italic mt-2">Sin datos de almacén</p>
           )}
@@ -260,8 +234,10 @@ function SectionNumber({ n }: { n: number }) {
 export default function AuditorApp() {
   const [dfTar, setDfTar] = useState<TareaRow[] | null>(null);
   const [dfMat, setDfMat] = useState<MaterialRow[] | null>(null);
+  const [dfOrd, setDfOrd] = useState<OrdenRow[] | null>(null);
   const [tarFileName, setTarFileName] = useState<string | null>(null);
   const [matFileName, setMatFileName] = useState<string | null>(null);
+  const [ordFileName, setOrdFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [customDict, setCustomDict] = useState<Record<string, string[]>>(() => loadCustomDict());
   const [groqKey, setGroqKey] = useState('');
@@ -275,13 +251,13 @@ export default function AuditorApp() {
 
   const auditOutput = React.useMemo(() => {
     if (!dfTar || !dfMat) return null;
-    try { return runAudit(dfTar, dfMat, customDict); }
+    try { return runAudit(dfTar, dfMat, customDict, dfOrd); }
     catch (e) { setError(String((e as Error).message)); return null; }
-  }, [dfTar, dfMat, customDict]);
+  }, [dfTar, dfMat, customDict, dfOrd]);
 
   const results = auditOutput?.results || [];
   const unrecognizedTasks = auditOutput?.unrecognizedTasks || [];
-  const metrics = auditOutput?.metrics || { c1: 0, c2: 0, c3: 0, b1: { taskCount: 0, uniqueOMs: 0, warehouses: [] }, b2: { taskCount: 0, uniqueOMs: 0, warehouses: [] }, b3: { taskCount: 0, uniqueOMs: 0, warehouses: [] } };
+  const metrics = auditOutput?.metrics || { c1: 0, c2: 0, c3: 0, b1: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b3: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] } };
   const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
 
   const handleFile = useCallback((file: File, setDf: (rows: Record<string, unknown>[]) => void, setFileName: (n: string) => void) => {
@@ -290,11 +266,12 @@ export default function AuditorApp() {
   }, []);
   const handleTarFile = useCallback((f: File) => handleFile(f, (rows) => setDfTar(rows as TareaRow[]), setTarFileName), [handleFile]);
   const handleMatFile = useCallback((f: File) => handleFile(f, (rows) => setDfMat(rows as MaterialRow[]), setMatFileName), [handleFile]);
+  const handleOrdFile = useCallback((f: File) => handleFile(f, (rows) => setDfOrd(rows as OrdenRow[]), setOrdFileName), [handleFile]);
 
   const handleExportExcel = useCallback(async () => {
     if (results.length === 0) return;
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Auditoría');
-    const cols = ['Nro. Orden', 'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 'Tipo de Hallazgo', 'Detalle'];
+    const cols = ['Nro. Orden', 'Tipo de orden', 'Centros de costos', 'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 'Tipo de Hallazgo', 'Detalle'];
     ws.addRow(cols); results.forEach(r => ws.addRow(cols.map(c => r[c as keyof AuditResult])));
     const headerRow = ws.getRow(1);
     headerRow.eachCell(cell => { cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } }; cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.border = thinBorder(); });
@@ -321,6 +298,8 @@ export default function AuditorApp() {
     setAiResult({ type: 'loading', text: 'Analizando desvío de taller...' }); setAiAnalyzeLoading(true);
     const prompt = `Actúa como un Auditor Senior de Flotas de Transporte y Logística. Analizá la siguiente inconsistencia en una Orden de Trabajo:
 - Nro Orden: ${fila['Nro. Orden']}
+- Tipo de Orden: ${fila['Tipo de orden'] || 'No disponible'}
+- Centro de Costos: ${fila['Centros de costos'] || 'No disponible'}
 - Vehículo: ${fila['Nombre Equipo']} (${fila['Equipo']})
 - Tarea del Mecánico: ${fila['Tarea']}
 - Estado de la Tarea: ${fila['Estado Tarea']}
@@ -409,12 +388,26 @@ Lista de tareas:\n${listado}`;
           <div className="flex items-center gap-2">
             {tarFileName && <Badge className="bg-emerald-500/10 border-emerald-500/25 text-emerald-400 text-[10px] font-mono hover:bg-emerald-500/15">Tareas ✓</Badge>}
             {matFileName && <Badge className="bg-emerald-500/10 border-emerald-500/25 text-emerald-400 text-[10px] font-mono hover:bg-emerald-500/15">Materiales ✓</Badge>}
+            {ordFileName && <Badge className="bg-emerald-500/10 border-emerald-500/25 text-emerald-400 text-[10px] font-mono hover:bg-emerald-500/15">Órdenes ✓</Badge>}
           </div>
         </div>
         <div className="header-glow" />
       </header>
 
-      <main className="relative z-10 flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="relative z-10 flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+        <Tabs defaultValue="mantenimiento" className="space-y-6">
+          <TabsList className="glass-card rounded-2xl p-1.5 h-auto bg-slate-900/50 border border-white/[0.06]">
+            <TabsTrigger value="mantenimiento" className="rounded-xl px-5 py-2.5 text-xs font-semibold data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-500/20 data-[state=active]:to-orange-500/10 data-[state=active]:text-amber-100 data-[state=active]:shadow-lg data-[state=active]:shadow-amber-500/5 text-slate-400 gap-2 transition-all">
+              <Wrench className="w-3.5 h-3.5" />
+              Mantenimiento & Stock
+            </TabsTrigger>
+            <TabsTrigger value="ov" className="rounded-xl px-5 py-2.5 text-xs font-semibold data-[state=active]:bg-gradient-to-r data-[state=active]:from-cyan-500/20 data-[state=active]:to-blue-500/10 data-[state=active]:text-cyan-100 data-[state=active]:shadow-lg data-[state=active]:shadow-cyan-500/5 text-slate-400 gap-2 transition-all">
+              <ShoppingCart className="w-3.5 h-3.5" />
+              OV vs Materiales
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="mantenimiento" className="space-y-8 mt-6">
 
         {/* Section 1: Upload */}
         <section className="animate-fade-in-up animate-fade-in-up-1">
@@ -425,9 +418,10 @@ Lista de tareas:\n${listado}`;
               <p className="text-[11px] text-slate-500 mt-0.5">Subí los archivos Excel o CSV del período a auditar</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FileUploader label="Tareas (Excel o CSV)" hint="Columna requerida: DocNum o Nro. Orden" accept=".xlsx,.csv" fileName={tarFileName} filled={!!tarFileName} onFile={handleTarFile} icon={<FileSpreadsheet className="w-6 h-6" />} />
             <FileUploader label="Materiales (Excel o CSV)" hint="Columna requerida: Nro. OM o Nro. Orden" accept=".xlsx,.csv" fileName={matFileName} filled={!!matFileName} onFile={handleMatFile} icon={<Warehouse className="w-6 h-6" />} />
+            <FileUploader label="Órdenes (Excel o CSV) — Opcional" hint="Agrega Tipo de orden y Centros de costos por OM" accept=".xlsx,.csv" fileName={ordFileName} filled={!!ordFileName} onFile={handleOrdFile} icon={<ClipboardList className="w-6 h-6" />} />
           </div>
           {error && (
             <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm flex items-center gap-3 backdrop-blur-sm">
@@ -482,8 +476,8 @@ Lista de tareas:\n${listado}`;
                 <Table>
                   <TableHeader>
                     <TableRow className="border-white/[0.04] hover:bg-transparent">
-                      {['Nro. Orden', 'Equipo', 'Nombre Equipo', 'Tarea', 'Estado', 'Tipo', 'Detalle'].map((h, i) => (
-                        <TableHead key={h} className={`bg-white/[0.02] text-slate-400 text-[10px] uppercase tracking-widest font-semibold ${i === 2 ? 'hidden lg:table-cell' : ''} ${i === 4 ? 'hidden md:table-cell' : ''} ${i === 6 ? 'hidden xl:table-cell' : ''}`}>{h}</TableHead>
+                      {['Nro. Orden', 'Tipo OM', 'C.Costos', 'Equipo', 'Tarea', 'Tipo', 'Detalle'].map((h, i) => (
+                        <TableHead key={h} className={`bg-white/[0.02] text-slate-400 text-[10px] uppercase tracking-widest font-semibold ${i === 1 ? 'hidden lg:table-cell' : ''} ${i === 3 ? 'hidden lg:table-cell' : ''} ${i === 6 ? 'hidden xl:table-cell' : ''}`}>{h}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -491,10 +485,14 @@ Lista de tareas:\n${listado}`;
                     {results.map((r, i) => (
                       <TableRow key={i} className="border-white/[0.03] table-row-glow">
                         <TableCell className="font-mono text-xs text-amber-300/70">{esc(r['Nro. Orden'])}</TableCell>
-                        <TableCell className="font-mono text-xs text-slate-300">{esc(r['Equipo'])}</TableCell>
-                        <TableCell className="text-xs text-slate-500 hidden lg:table-cell">{esc(r['Nombre Equipo'])}</TableCell>
+                        <TableCell className="text-xs hidden lg:table-cell">
+                          {r['Tipo de orden'] ? (
+                            <Badge variant="outline" className="text-[10px] font-mono border-violet-500/25 text-violet-300 bg-violet-500/[0.07]">{esc(r['Tipo de orden'])}</Badge>
+                          ) : <span className="text-slate-600 text-xs">—</span>}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-teal-300/80">{esc(r['Centros de costos']) || <span className="text-slate-600">—</span>}</TableCell>
+                        <TableCell className="font-mono text-xs text-slate-300 hidden lg:table-cell">{esc(r['Equipo'])}</TableCell>
                         <TableCell className="text-xs text-slate-300 max-w-[200px] truncate" title={r['Tarea']}>{esc(r['Tarea'])}</TableCell>
-                        <TableCell className="text-xs text-slate-500 hidden md:table-cell">{esc(r['Estado Tarea'])}</TableCell>
                         <TableCell><HallazgoBadge tipo={r['Tipo de Hallazgo']} /></TableCell>
                         <TableCell className="text-xs text-slate-500 max-w-[250px] truncate hidden xl:table-cell" title={r['Detalle']}>{esc(r['Detalle'])}</TableCell>
                       </TableRow>
@@ -672,6 +670,17 @@ Lista de tareas:\n${listado}`;
             </div>
           </section>
         )}
+          </TabsContent>
+
+          <TabsContent value="ov" className="mt-6">
+            <OVTab
+              groqKey={groqKey}
+              groqModel={groqModel}
+              onGroqKeyChange={setGroqKey}
+              onGroqModelChange={setGroqModel}
+            />
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Footer */}

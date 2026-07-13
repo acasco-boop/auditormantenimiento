@@ -19,6 +19,16 @@ export interface TareaRow {
   [key: string]: unknown;
 }
 
+export interface OrdenRow {
+  'Nro. orden'?: string | number | null;
+  'Tipo de orden'?: string | null;
+  'Centos de costos'?: string | null;
+  'Estado'?: string | null;
+  'Código de equipo'?: string | null;
+  'Nombre equipo'?: string | null;
+  [key: string]: unknown;
+}
+
 export interface MaterialRow {
   'Equipo'?: string | null;
   'Descripción'?: string | null;
@@ -45,6 +55,8 @@ export interface AuditResult {
   'Estado Tarea': string;
   'Tipo de Hallazgo': string;
   'Detalle': string;
+  'Tipo de orden'?: string;
+  'Centros de costos'?: string;
 }
 
 export interface UnrecognizedTask {
@@ -57,6 +69,7 @@ export interface MetricBreakdown {
   taskCount: number;
   uniqueOMs: number;
   warehouses: { name: string; count: number }[];
+  tiposOrden: { name: string; count: number }[];
 }
 
 export interface AISuggestion {

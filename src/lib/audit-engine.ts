@@ -1,4 +1,4 @@
-import type { TareaRow, MaterialRow, AuditResult, UnrecognizedTask, MetricBreakdown } from './audit-types';
+import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, MetricBreakdown } from './audit-types';
 import { PARTS_TO_CHECK } from './parts-dictionary';
 
 export function stripAccents(str: string): string {
@@ -50,7 +50,8 @@ export interface AuditOutput {
 export function runAudit(
   dfTar: TareaRow[],
   dfMat: MaterialRow[],
-  customDict: Record<string, string[]> = {}
+  customDict: Record<string, string[]> = {},
+  dfOrd: OrdenRow[] | null = null
 ): AuditOutput {
   const okTar = normalizeOrderCol(dfTar as unknown as Record<string, unknown>[], 'DocNum');
   if (!okTar) throw new Error('No se encontró la columna de Orden (DocNum o Nro. Orden) en el archivo de Tareas.');
@@ -65,6 +66,21 @@ export function runAudit(
     if (!matByOrder[key]) matByOrder[key] = [];
     matByOrder[key].push(r);
   });
+
+  // Órdenes indexadas por Nro. orden → { tipoOrden, centrosCostos }
+  const ordByOrder: Record<string, { tipoOrden: string; centrosCostos: string }> = {};
+  if (dfOrd && dfOrd.length > 0) {
+    dfOrd.forEach(r => {
+      const key = String(r['Nro. orden'] ?? '');
+      if (!key) return;
+      if (!ordByOrder[key]) {
+        ordByOrder[key] = {
+          tipoOrden: String(r['Tipo de orden'] || '').trim(),
+          centrosCostos: String(r['Centos de costos'] || '').trim(),
+        };
+      }
+    });
+  }
 
   const activeParts = { ...PARTS_TO_CHECK, ...customDict };
   const unrecognizedMap: Record<string, UnrecognizedTask> = {};
@@ -91,6 +107,7 @@ export function runAudit(
       return acc + (isNaN(v) ? 0 : v);
     }, 0);
 
+    const ordData = ordByOrder[String(order)];
     const base: AuditResult = {
       'Nro. Orden': order,
       'Equipo': String(row['Codigo equipo'] || ''),
@@ -99,6 +116,10 @@ export function runAudit(
       'Estado Tarea': String(row['Estado'] || ''),
       'Tipo de Hallazgo': '',
       'Detalle': '',
+      ...(ordData ? {
+        'Tipo de orden': ordData.tipoOrden || undefined,
+        'Centros de costos': ordData.centrosCostos || undefined,
+      } : {}),
     };
 
     if (mats.length === 0) {
@@ -139,6 +160,7 @@ export function runAudit(
   const calcBreakdown = (subset: AuditResult[], hasWarehouse: boolean): MetricBreakdown => {
     const uniqueOMs = [...new Set(subset.map(r => String(r['Nro. Orden'])))];
     const warehouses: Record<string, number> = {};
+    const tiposOrden: Record<string, number> = {};
     if (hasWarehouse) {
       uniqueOMs.forEach(om => {
         const mats = matByOrder[om] || [];
@@ -149,10 +171,18 @@ export function runAudit(
         });
       });
     }
+    // Breakdown por tipo de orden
+    subset.forEach(r => {
+      const tipo = String(r['Tipo de orden'] || 'Sin dato').trim();
+      if (tipo) tiposOrden[tipo] = (tiposOrden[tipo] || 0) + 1;
+    });
     return {
       taskCount: subset.length,
       uniqueOMs: uniqueOMs.length,
       warehouses: Object.entries(warehouses)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count),
+      tiposOrden: Object.entries(tiposOrden)
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count),
     };
