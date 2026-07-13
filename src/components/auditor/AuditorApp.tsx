@@ -538,7 +538,7 @@ ${listado}`;
             <img
               src="/logo-auditor.png"
               alt="Logo"
-              className="h-9 w-auto object-contain opacity-90"
+              className="h-14 w-auto object-contain opacity-90"
             />
           </div>
           <div className="flex items-center gap-2">
