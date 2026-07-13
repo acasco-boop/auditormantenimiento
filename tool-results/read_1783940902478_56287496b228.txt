@@ -1,0 +1,918 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useCallback, useRef, useEffect } from 'react';
+     4→import Papa from 'papaparse';
+     5→import ExcelJS from 'exceljs';
+     6→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+     7→import { Button } from '@/components/ui/button';
+     8→import { Badge } from '@/components/ui/badge';
+     9→import { Input } from '@/components/ui/input';
+    10→import { Label } from '@/components/ui/label';
+    11→import {
+    12→  Select,
+    13→  SelectContent,
+    14→  SelectItem,
+    15→  SelectTrigger,
+    16→  SelectValue,
+    17→} from '@/components/ui/select';
+    18→import {
+    19→  Table,
+    20→  TableBody,
+    21→  TableCell,
+    22→  TableHead,
+    23→  TableHeader,
+    24→  TableRow,
+    25→} from '@/components/ui/table';
+    26→import { Checkbox } from '@/components/ui/checkbox';
+    27→import { Separator } from '@/components/ui/separator';
+    28→import { ScrollArea } from '@/components/ui/scroll-area';
+    29→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+    30→import {
+    31→  Upload, FileSpreadsheet, Download, Wrench, Bot, Brain,
+    32→  AlertTriangle, XCircle, CheckCircle2, Warehouse, BarChart3,
+    33→  ChevronRight, Loader2, Trash2, BookOpen, Lightbulb, Search
+    34→} from 'lucide-react';
+    35→import type { TareaRow, MaterialRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
+    36→import { runAudit, up } from '@/lib/audit-engine';
+    37→import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
+    38→
+    39→const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
+    40→
+    41→function loadCustomDict(): Record<string, string[]> {
+    42→  if (typeof window === 'undefined') return {};
+    43→  try {
+    44→    const raw = localStorage.getItem(CUSTOM_DICT_KEY);
+    45→    return raw ? JSON.parse(raw) : {};
+    46→  } catch { return {}; }
+    47→}
+    48→function saveCustomDict(dict: Record<string, string[]>) {
+    49→  if (typeof window === 'undefined') return;
+    50→  try { localStorage.setItem(CUSTOM_DICT_KEY, JSON.stringify(dict)); } catch { /* noop */ }
+    51→}
+    52→
+    53→async function parseTabularFile(file: File): Promise<Record<string, unknown>[]> {
+    54→  const name = file.name.toLowerCase();
+    55→  if (name.endsWith('.csv')) {
+    56→    const text = await file.text();
+    57→    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: true });
+    58→    return parsed.data as Record<string, unknown>[];
+    59→  } else {
+    60→    const buf = await file.arrayBuffer();
+    61→    const wb = new ExcelJS.Workbook();
+    62→    await wb.xlsx.load(buf);
+    63→    const ws = wb.worksheets[0];
+    64→    const rows: Record<string, unknown>[] = [];
+    65→    let headers: string[] = [];
+    66→    ws.eachRow((row, rowNumber) => {
+    67→      const values = row.values.slice(1);
+    68→      if (rowNumber === 1) {
+    69→        headers = values.map(v => (v === undefined || v === null) ? '' : String(v).trim());
+    70→      } else {
+    71→        const obj: Record<string, unknown> = {};
+    72→        headers.forEach((h, i) => {
+    73→          let v = values[i];
+    74→          if (v && typeof v === 'object' && 'text' in (v as object)) v = (v as { text: unknown }).text;
+    75→          if (v && typeof v === 'object' && 'result' in (v as object)) v = (v as { result: unknown }).result;
+    76→          obj[h] = v === undefined ? null : v;
+    77→        });
+    78→        rows.push(obj);
+    79→      }
+    80→    });
+    81→    return rows;
+    82→  }
+    83→}
+    84→
+    85→function esc(v: unknown): string {
+    86→  if (v === null || v === undefined) return '';
+    87→  return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+    88→}
+    89→
+    90→function thinBorder() {
+    91→  const side = { style: 'thin' as const, color: { argb: 'FFD9D9D9' } };
+    92→  return { top: side, bottom: side, left: side, right: side };
+    93→}
+    94→
+    95→/* =================== SUB-COMPONENTS =================== */
+    96→
+    97→interface FileUploaderProps {
+    98→  label: string;
+    99→  hint: string;
+   100→  accept: string;
+   101→  fileName: string | null;
+   102→  filled: boolean;
+   103→  onFile: (file: File) => void;
+   104→  icon: React.ReactNode;
+   105→}
+   106→
+   107→function FileUploader({ label, hint, accept, fileName, filled, onFile, icon }: FileUploaderProps) {
+   108→  const inputRef = useRef<HTMLInputElement>(null);
+   109→  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+   110→    const f = e.target.files?.[0];
+   111→    if (f) onFile(f);
+   112→  };
+   113→  return (
+   114→    <Card
+   115→      className={`relative cursor-pointer transition-all duration-200 hover:shadow-lg hover:shadow-amber-500/5 border-dashed hover:border-solid group ${
+   116→        filled ? 'border-amber-500/50 bg-amber-950/10' : 'border-slate-700/50 bg-slate-900/30'
+   117→      }`}
+   118→      onClick={() => inputRef.current?.click()}
+   119→    >
+   120→      <input ref={inputRef} type="file" accept={accept} onChange={handleChange} className="hidden" />
+   121→      <CardContent className="p-5 flex items-center gap-4">
+   122→        <div className={`p-3 rounded-xl transition-colors ${filled ? 'bg-amber-500/15 text-amber-400' : 'bg-slate-800/80 text-slate-400 group-hover:text-amber-400'}`}>
+   123→          {icon}
+   124→        </div>
+   125→        <div className="flex-1 min-w-0">
+   126→          <p className="font-semibold text-sm text-slate-200">{label}</p>
+   127→          <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
+   128→          {fileName && <p className="text-xs text-amber-400 font-mono mt-1 truncate">{fileName}</p>}
+   129→        </div>
+   130→        {filled && <CheckCircle2 className="w-5 h-5 text-amber-400 shrink-0" />}
+   131→        {!filled && <Upload className="w-4 h-4 text-slate-600 shrink-0" />}
+   132→      </CardContent>
+   133→    </Card>
+   134→  );
+   135→}
+   136→
+   137→interface WarehouseBarProps {
+   138→  name: string;
+   139→  count: number;
+   140→  max: number;
+   141→  color: string;
+   142→  barColor: string;
+   143→}
+   144→
+   145→function WarehouseBar({ name, count, max, color, barColor }: WarehouseBarProps) {
+   146→  const pct = Math.round((count / max) * 100);
+   147→  return (
+   148→    <div className="flex items-center gap-2.5 py-1">
+   149→      <span className="font-mono text-xs text-slate-300 w-10 shrink-0">{name}</span>
+   150→      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+   151→        <div className={`h-full rounded-full transition-all duration-700 ease-out ${barColor}`} style={{ width: `${pct}%` }} />
+   152→      </div>
+   153→      <span className={`font-mono text-xs font-semibold w-8 text-right ${color}`}>{count}</span>
+   154→    </div>
+   155→  );
+   156→}
+   157→
+   158→interface MetricCardProps {
+   159→  count: number;
+   160→  label: string;
+   161→  breakdown: MetricBreakdown;
+   162→  hasWarehouse: boolean;
+   163→  colorClass: string;
+   164→  icon: React.ReactNode;
+   165→  bgGlow: string;
+   166→  barColor: string;
+   167→  valueColor: string;
+   168→}
+   169→
+   170→function MetricCard({ count, label, breakdown, hasWarehouse, icon, bgGlow, barColor, valueColor }: MetricCardProps) {
+   171→  if (count === 0) return null;
+   172→  const maxWh = breakdown.warehouses.length > 0 ? breakdown.warehouses[0].count : 1;
+   173→  return (
+   174→    <Card className={`relative overflow-hidden border-0 ${bgGlow}`}>
+   175→      <div className="absolute top-0 right-0 w-24 h-24 rounded-full blur-3xl opacity-10 bg-current" />
+   176→      <CardContent className="p-5 relative">
+   177→        <div className="flex items-start justify-between">
+   178→          <div>
+   179→            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</p>
+   180→            <p className={`text-4xl font-bold font-mono mt-2 ${valueColor}`}>{count}</p>
+   181→          </div>
+   182→          <div className="p-2.5 rounded-xl bg-white/5">{icon}</div>
+   183→        </div>
+   184→        <Separator className="my-3 bg-white/10" />
+   185→        <div className="space-y-1.5">
+   186→          <div className="flex justify-between items-center">
+   187→            <span className="text-xs text-slate-400">Tareas afectadas</span>
+   188→            <span className={`text-sm font-semibold font-mono ${valueColor}`}>{breakdown.taskCount}</span>
+   189→          </div>
+   190→          <div className="flex justify-between items-center">
+   191→            <span className="text-xs text-slate-400">OM únicas</span>
+   192→            <span className={`text-sm font-semibold font-mono ${valueColor}`}>{breakdown.uniqueOMs}</span>
+   193→          </div>
+   194→        </div>
+   195→        {hasWarehouse && (
+   196→          <>
+   197→            <p className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mt-3 mb-1">Desglose por almacén</p>
+   198→            {breakdown.warehouses.length > 0 ? (
+   199→              <div>
+   200→                {breakdown.warehouses.map(wh => (
+   201→                  <WarehouseBar key={wh.name} name={wh.name} count={wh.count} max={maxWh} color={valueColor} barColor={barColor} />
+   202→                ))}
+   203→              </div>
+   204→            ) : (
+   205→              <p className="text-xs text-slate-500 italic">Sin datos de almacén</p>
+   206→            )}
+   207→          </>
+   208→        )}
+   209→        {!hasWarehouse && count > 0 && (
+   210→          <>
+   211→            <p className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mt-3 mb-1">Desglose por almacén</p>
+   212→            <p className="text-xs text-slate-500 italic">No aplica (0 repuestos)</p>
+   213→          </>
+   214→        )}
+   215→      </CardContent>
+   216→    </Card>
+   217→  );
+   218→}
+   219→
+   220→function HallazgoBadge({ tipo }: { tipo: string }) {
+   221→  let variant: 'amber' | 'orange' | 'green' = 'orange';
+   222→  if (tipo.startsWith('1)')) variant = 'amber';
+   223→  else if (tipo.startsWith('3)')) variant = 'green';
+   224→  const styles = {
+   225→    amber: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+   226→    orange: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+   227→    green: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+   228→  };
+   229→  return (
+   230→    <span className={`inline-flex items-center px-2.5 py-1 rounded-md font-mono text-[11px] border ${styles[variant]}`}>
+   231→      {tipo}
+   232→    </span>
+   233→  );
+   234→}
+   235→
+   236→/* =================== MAIN COMPONENT =================== */
+   237→
+   238→export default function AuditorApp() {
+   239→  const [dfTar, setDfTar] = useState<TareaRow[] | null>(null);
+   240→  const [dfMat, setDfMat] = useState<MaterialRow[] | null>(null);
+   241→  const [tarFileName, setTarFileName] = useState<string | null>(null);
+   242→  const [matFileName, setMatFileName] = useState<string | null>(null);
+   243→  const [error, setError] = useState<string | null>(null);
+   244→  const [customDict, setCustomDict] = useState<Record<string, string[]>>(() => loadCustomDict());
+   245→  const [groqKey, setGroqKey] = useState('');
+   246→  const [groqModel, setGroqModel] = useState('llama-3.3-70b-versatile');
+   247→  const [selectedOrder, setSelectedOrder] = useState('');
+   248→  const [aiResult, setAiResult] = useState<{ type: 'loading' | 'result' | 'error' | 'warn'; text: string } | null>(null);
+   249→  const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+   250→  const [aiDictLoading, setAiDictLoading] = useState(false);
+   251→  const [aiAnalyzeLoading, setAiAnalyzeLoading] = useState(false);
+   252→
+   253→  const auditOutput = React.useMemo(() => {
+   254→    if (!dfTar || !dfMat) return null;
+   255→    try {
+   256→      return runAudit(dfTar, dfMat, customDict);
+   257→    } catch (e) {
+   258→      setError(String((e as Error).message));
+   259→      return null;
+   260→    }
+   261→  }, [dfTar, dfMat, customDict]);
+   262→
+   263→  const results = auditOutput?.results || [];
+   264→  const unrecognizedTasks = auditOutput?.unrecognizedTasks || [];
+   265→  const metrics = auditOutput?.metrics || { c1: 0, c2: 0, c3: 0, b1: { taskCount: 0, uniqueOMs: 0, warehouses: [] }, b2: { taskCount: 0, uniqueOMs: 0, warehouses: [] }, b3: { taskCount: 0, uniqueOMs: 0, warehouses: [] } };
+   266→  const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
+   267→
+   268→  const handleFile = useCallback((
+   269→    file: File,
+   270→    setDf: (rows: Record<string, unknown>[]) => void,
+   271→    setFileName: (n: string) => void
+   272→  ) => {
+   273→    setFileName(file.name);
+   274→    setError(null);
+   275→    parseTabularFile(file)
+   276→      .then(rows => setDf(rows))
+   277→      .catch(e => setError(`Error al leer "${file.name}": ${(e as Error).message}`));
+   278→  }, []);
+   279→
+   280→  const handleTarFile = useCallback((f: File) => handleFile(f, (rows) => setDfTar(rows as TareaRow[]), setTarFileName), [handleFile]);
+   281→  const handleMatFile = useCallback((f: File) => handleFile(f, (rows) => setDfMat(rows as MaterialRow[]), setMatFileName), [handleFile]);
+   282→
+   283→  const handleExportExcel = useCallback(async () => {
+   284→    if (results.length === 0) return;
+   285→    const wb = new ExcelJS.Workbook();
+   286→    const ws = wb.addWorksheet('Auditoría');
+   287→    const cols = ['Nro. Orden', 'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 'Tipo de Hallazgo', 'Detalle'];
+   288→    ws.addRow(cols);
+   289→    results.forEach(r => ws.addRow(cols.map(c => r[c as keyof AuditResult])));
+   290→
+   291→    const headerRow = ws.getRow(1);
+   292→    headerRow.eachCell(cell => {
+   293→      cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+   294→      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } };
+   295→      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+   296→      cell.border = thinBorder();
+   297→    });
+   298→
+   299→    for (let i = 0; i < results.length; i++) {
+   300→      const rowIdx = i + 2;
+   301→      const row = ws.getRow(rowIdx);
+   302→      const hallazgo = String(results[i]['Tipo de Hallazgo']);
+   303→      let fillColor = 'FFFCE4D6';
+   304→      if (hallazgo.startsWith('1)')) fillColor = 'FFFFF2CC';
+   305→      else if (hallazgo.startsWith('3)')) fillColor = 'FFE2EFDA';
+   306→      const altFill = rowIdx % 2 === 0 ? 'FFF9FAFB' : null;
+   307→      row.eachCell((cell, colNumber) => {
+   308→        cell.border = thinBorder();
+   309→        if (colNumber === 6) {
+   310→          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+   311→        } else if (altFill) {
+   312→          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: altFill } };
+   313→        }
+   314→        if ([1, 2, 5].includes(colNumber)) {
+   315→          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+   316→        } else {
+   317→          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
+   318→        }
+   319→      });
+   320→    }
+   321→
+   322→    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: results.length + 1, column: cols.length } };
+   323→    ws.columns.forEach(col => {
+   324→      let maxLen = 10;
+   325→      col.eachCell({ includeEmpty: true }, cell => {
+   326→        const len = cell.value ? String(cell.value).length : 0;
+   327→        if (len > maxLen) maxLen = len;
+   328→      });
+   329→      col.width = Math.min(maxLen + 3, 80);
+   330→    });
+   331→
+   332→    const buf = await wb.xlsx.writeBuffer();
+   333→    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+   334→    const url = URL.createObjectURL(blob);
+   335→    const a = document.createElement('a');
+   336→    a.href = url;
+   337→    a.download = 'Auditoria_Mantenimiento_Generado.xlsx';
+   338→    document.body.appendChild(a);
+   339→    a.click();
+   340→    document.body.removeChild(a);
+   341→    URL.revokeObjectURL(url);
+   342→  }, [results]);
+   343→
+   344→  const handleAnalyzeIA = useCallback(async () => {
+   345→    if (!groqKey) { setAiResult({ type: 'warn', text: 'Introducí tu Groq API Key para habilitar el diagnóstico por IA.' }); return; }
+   346→    const fila = results.find(r => String(r['Nro. Orden']) === selectedOrder);
+   347→    if (!fila) { setAiResult({ type: 'error', text: 'No se encontró la orden seleccionada.' }); return; }
+   348→
+   349→    setAiResult({ type: 'loading', text: 'Analizando desvío de taller...' });
+   350→    setAiAnalyzeLoading(true);
+   351→
+   352→    const prompt = `Actúa como un Auditor Senior de Flotas de Transporte y Logística. Analizá la siguiente inconsistencia en una Orden de Trabajo:
+   353→- Nro Orden: ${fila['Nro. Orden']}
+   354→- Vehículo: ${fila['Nombre Equipo']} (${fila['Equipo']})
+   355→- Tarea del Mecánico: ${fila['Tarea']}
+   356→- Estado de la Tarea: ${fila['Estado Tarea']}
+   357→- Diagnóstico del Sistema: ${fila['Tipo de Hallazgo']}
+   358→- Datos del Pañol/Stock: ${fila['Detalle']}
+   359→
+   360→Escribí un análisis breve, directo al grano y profesional (en español de Argentina) explicando:
+   361→1. Qué error administrativo o humano ocurrió en el taller (Causa Raíz).
+   362→2. Qué riesgo representa para el stock general de pañol o para la seguridad física de la unidad.
+   363→3. Qué acción correctiva inmediata se le debe exigir al supervisor de taller.`;
+   364→
+   365→    try {
+   366→      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+   367→        method: 'POST',
+   368→        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
+   369→        body: JSON.stringify({ model: groqModel, messages: [{ role: 'user', content: prompt }], temperature: 0.3 }),
+   370→      });
+   371→      const data = await resp.json();
+   372→      if (!resp.ok) {
+   373→        const msg = data?.error?.message || JSON.stringify(data);
+   374→        setAiResult({ type: 'error', text: `Error al conectar con Groq: ${msg}` });
+   375→      } else {
+   376→        setAiResult({ type: 'result', text: data.choices[0].message.content });
+   377→      }
+   378→    } catch (e) {
+   379→      setAiResult({ type: 'error', text: `Error: ${(e as Error).message}` });
+   380→    } finally {
+   381→      setAiAnalyzeLoading(false);
+   382→    }
+   383→  }, [groqKey, groqModel, selectedOrder, results]);
+   384→
+   385→  const handleAnalyzeDict = useCallback(async () => {
+   386→    if (!groqKey) { return; }
+   387→    if (unrecognizedTasks.length === 0) { return; }
+   388→
+   389→    setAiDictLoading(true);
+   390→    const batch = unrecognizedTasks.slice(0, 10);
+   391→    const listado = batch.map((u, i) => `${i + 1}. ${u.tarea}`).join('\n');
+   392→    const prompt = `Sos un experto en repuestos de mantenimiento de flotas de transporte pesado (camiones, acoplados).
+   393→Te paso una lista de tareas de taller que indican un cambio de repuesto, pero cuyo repuesto todavía no está
+   394→identificado en un diccionario de categorías.
+   395→
+   396→Para CADA tarea de la lista, identificá:
+   397→- "categoria": el nombre genérico del repuesto que se está cambiando, en UNA sola palabra o frase corta,
+   398→  en MAYÚSCULAS, sin tildes (ej: NEUMATICO, RODAMIENTO, BOMBA DE AGUA).
+   399→- "sinonimos": una lista de 2 a 5 palabras o frases en MAYÚSCULAS sin tildes que podrían aparecer en la
+   400→  descripción de ese mismo repuesto en un sistema de stock de pañol (sinónimos, variantes, nombres comerciales).
+   401→
+   402→Si dos tareas de la lista se refieren al mismo repuesto, usá la MISMA categoría para ambas.
+   403→Si una tarea no menciona ningún repuesto físico reconocible (por ejemplo, es una tarea administrativa o
+   404→ambigua), devolvé "categoria": null para esa tarea.
+   405→
+   406→Respondé ÚNICAMENTE con un array JSON válido, sin texto adicional, sin explicaciones, sin bloques de
+   407→markdown, con esta forma exacta:
+   408→[{"tarea": "...", "categoria": "...", "sinonimos": ["...", "..."]}, ...]
+   409→
+   410→Lista de tareas:
+   411→${listado}`;
+   412→
+   413→    try {
+   414→      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+   415→        method: 'POST',
+   416→        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
+   417→        body: JSON.stringify({ model: groqModel, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 4096 }),
+   418→      });
+   419→      const data = await resp.json();
+   420→      if (!resp.ok) {
+   421→        setSuggestions([]);
+   422→        setAiDictLoading(false);
+   423→        return;
+   424→      }
+   425→
+   426→      let text = data.choices[0].message.content.trim();
+   427→      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+   428→      text = text.replace(/```[a-zA-Z]*\s*/g, '').replace(/```/g, '').trim();
+   429→      const firstBracket = text.indexOf('[');
+   430→      const lastBracket = text.lastIndexOf(']');
+   431→      if (firstBracket !== -1 && lastBracket > firstBracket) {
+   432→        text = text.substring(firstBracket, lastBracket + 1);
+   433→      }
+   434→      text = text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+   435→      text = text.replace(/,\s*([}\]])/g, '$1');
+   436→      const openBraces = (text.match(/\{/g) || []).length;
+   437→      const closeBraces = (text.match(/\}/g) || []).length;
+   438→      const openBrackets = (text.match(/\[/g) || []).length;
+   439→      const closeBrackets = (text.match(/\]/g) || []).length;
+   440→      if (closeBraces < openBraces || closeBrackets < openBrackets) {
+   441→        text = text.replace(/,\s*$/, '');
+   442→        text += '}'.repeat(openBraces - closeBraces) + ']'.repeat(openBrackets - closeBrackets);
+   443→      }
+   444→
+   445→      let parsed: AISuggestion[];
+   446→      try { parsed = JSON.parse(text); } catch { parsed = []; }
+   447→      if (Array.isArray(parsed)) {
+   448→        setSuggestions(parsed.filter(s => s && s.categoria));
+   449→      } else {
+   450→        setSuggestions([]);
+   451→      }
+   452→    } catch {
+   453→      setSuggestions([]);
+   454→    } finally {
+   455→      setAiDictLoading(false);
+   456→    }
+   457→  }, [groqKey, groqModel, unrecognizedTasks]);
+   458→
+   459→  const [editedSuggestions, setEditedSuggestions] = useState<AISuggestion[]>([]);
+   460→
+   461→  const handleSaveSuggestions = useCallback(() => {
+   462→    const newDict = { ...customDict };
+   463→    const toSave = editedSuggestions.length > 0 ? editedSuggestions : suggestions;
+   464→    toSave.forEach(s => {
+   465→      const cat = up(s.categoria);
+   466→      const syns = (s.sinonimos || []).map(x => up(x)).filter(Boolean);
+   467→      if (!cat) return;
+   468→      const existing = newDict[cat] || PARTS_TO_CHECK[cat] || [];
+   469→      newDict[cat] = [...new Set([...existing, ...syns, cat])];
+   470→    });
+   471→    setCustomDict(newDict);
+   472→    saveCustomDict(newDict);
+   473→    setSuggestions([]);
+   474→    setEditedSuggestions([]);
+   475→  }, [editedSuggestions, suggestions, customDict]);
+   476→
+   477→  const handleDeleteDictEntry = useCallback((cat: string) => {
+   478→    const newDict = { ...customDict };
+   479→    delete newDict[cat];
+   480→    setCustomDict(newDict);
+   481→    saveCustomDict(newDict);
+   482→  }, [customDict]);
+   483→
+   484→  const handleExportDict = useCallback(() => {
+   485→    const blob = new Blob([JSON.stringify(customDict, null, 2)], { type: 'application/json' });
+   486→    const url = URL.createObjectURL(blob);
+   487→    const a = document.createElement('a');
+   488→    a.href = url; a.download = 'diccionario_repuestos_aprendido.json';
+   489→    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+   490→    URL.revokeObjectURL(url);
+   491→  }, [customDict]);
+   492→
+   493→  const handleImportDict = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+   494→    const file = e.target.files?.[0];
+   495→    if (!file) return;
+   496→    file.text().then(text => {
+   497→      try {
+   498→        const imported = JSON.parse(text);
+   499→        const newDict = { ...customDict };
+   500→        Object.keys(imported).forEach(cat => {
+   501→          const catUp = up(cat);
+   502→          const existing = newDict[catUp] || [];
+   503→          newDict[catUp] = [...new Set([...existing, ...(imported[cat] || []).map((x: string) => up(x))])];
+   504→        });
+   505→        setCustomDict(newDict);
+   506→        saveCustomDict(newDict);
+   507→      } catch { /* ignore */ }
+   508→    });
+   509→    e.target.value = '';
+   510→  }, [customDict]);
+   511→
+   512→  const handleClearDict = useCallback(() => {
+   513→    if (!confirm('¿Vaciar todo el diccionario aprendido? Podés exportarlo antes si querés conservarlo.')) return;
+   514→    setCustomDict({});
+   515→    saveCustomDict({});
+   516→  }, []);
+   517→
+   518→  const hasResults = results.length > 0;
+   519→  const activeTab = hasResults ? 'resultados' : 'carga';
+   520→
+   521→  return (
+   522→    <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-950 via-[#0b1520] to-[#081019] text-slate-100">
+   523→      {/* Header */}
+   524→      <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-50">
+   525→        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center gap-4">
+   526→          <div className="p-2.5 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/10 border border-amber-500/20">
+   527→            <Wrench className="w-5 h-5 text-amber-400" />
+   528→          </div>
+   529→          <div className="flex-1 min-w-0">
+   530→            <h1 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight">
+   531→              Auditoría de Mantenimiento & Stock
+   532→            </h1>
+   533→            <p className="text-xs text-slate-500 hidden sm:block">
+   534→              Panel de control · Taller & Pañol · Corre 100% local en tu navegador
+   535→            </p>
+   536→          </div>
+   537→          <div className="flex items-center gap-2 shrink-0">
+   538→            <img
+   539→              src="/logo-auditor.png"
+   540→              alt="Logo"
+   541→              className="h-14 w-auto object-contain opacity-90"
+   542→            />
+   543→          </div>
+   544→          <div className="flex items-center gap-2">
+   545→            {tarFileName && <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 text-[10px] font-mono">Tareas ✓</Badge>}
+   546→            {matFileName && <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 text-[10px] font-mono">Materiales ✓</Badge>}
+   547→          </div>
+   548→        </div>
+   549→      </header>
+   550→
+   551→      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+   552→        {/* Section 1: File Upload */}
+   553→        <section>
+   554→          <div className="flex items-center gap-3 mb-4">
+   555→            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 text-sm font-bold font-mono">1</div>
+   556→            <h2 className="text-base font-semibold text-slate-200">Cargar planillas de datos</h2>
+   557→          </div>
+   558→          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+   559→            <FileUploader
+   560→              label="Tareas (Excel o CSV)"
+   561→              hint="Debe tener columna DocNum o Nro. Orden"
+   562→              accept=".xlsx,.csv"
+   563→              fileName={tarFileName}
+   564→              filled={!!tarFileName}
+   565→              onFile={handleTarFile}
+   566→              icon={<FileSpreadsheet className="w-6 h-6" />}
+   567→            />
+   568→            <FileUploader
+   569→              label="Materiales (Excel o CSV)"
+   570→              hint="Debe tener columna Nro. OM o Nro. Orden"
+   571→              accept=".xlsx,.csv"
+   572→              fileName={matFileName}
+   573→              filled={!!matFileName}
+   574→              onFile={handleMatFile}
+   575→              icon={<Warehouse className="w-6 h-6" />}
+   576→            />
+   577→          </div>
+   578→          {error && (
+   579→            <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm flex items-center gap-2">
+   580→              <XCircle className="w-4 h-4 shrink-0" />
+   581→              {error}
+   582→            </div>
+   583→          )}
+   584→        </section>
+   585→
+   586→        {/* Section 2: Results */}
+   587→        {hasResults && (
+   588→          <section>
+   589→            <div className="flex items-center gap-3 mb-4">
+   590→              <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 text-sm font-bold font-mono">2</div>
+   591→              <h2 className="text-base font-semibold text-slate-200">Resumen de incoherencias encontradas</h2>
+   592→            </div>
+   593→
+   594→            {/* Metric Cards */}
+   595→            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+   596→              <MetricCard
+   597→                count={metrics.c1}
+   598→                label="Sin repuestos asignados"
+   599→                breakdown={metrics.b1}
+   600→                hasWarehouse={false}
+   601→                icon={<AlertTriangle className="w-5 h-5 text-amber-400" />}
+   602→                bgGlow="bg-gradient-to-br from-amber-950/40 via-amber-900/10 to-slate-900/40"
+   603→                barColor="bg-amber-400"
+   604→                valueColor="text-amber-400"
+   605→                colorClass="amber"
+   606→              />
+   607→              <MetricCard
+   608→                count={metrics.c2}
+   609→                label="Desconexión / cruce erróneo"
+   610→                breakdown={metrics.b2}
+   611→                hasWarehouse={true}
+   612→                icon={<XCircle className="w-5 h-5 text-orange-400" />}
+   613→                bgGlow="bg-gradient-to-br from-orange-950/40 via-orange-900/10 to-slate-900/40"
+   614→                barColor="bg-orange-400"
+   615→                valueColor="text-orange-400"
+   616→                colorClass="orange"
+   617→              />
+   618→              <MetricCard
+   619→                count={metrics.c3}
+   620→                label="Planificados con Salida = 0"
+   621→                breakdown={metrics.b3}
+   622→                hasWarehouse={true}
+   623→                icon={<BarChart3 className="w-5 h-5 text-emerald-400" />}
+   624→                bgGlow="bg-gradient-to-br from-emerald-950/40 via-emerald-900/10 to-slate-900/40"
+   625→                barColor="bg-emerald-400"
+   626→                valueColor="text-emerald-400"
+   627→                colorClass="green"
+   628→              />
+   629→            </div>
+   630→
+   631→            {/* Results Table */}
+   632→            <Card className="border-slate-800/50 bg-slate-900/30">
+   633→              <CardHeader className="pb-3">
+   634→                <div className="flex items-center justify-between flex-wrap gap-3">
+   635→                  <div className="flex items-center gap-2">
+   636→                    <Search className="w-4 h-4 text-slate-400" />
+   637→                    <CardTitle className="text-sm font-semibold text-slate-300">Detalle de hallazgos</CardTitle>
+   638→                    <Badge variant="secondary" className="text-[10px] font-mono">{results.length} registros</Badge>
+   639→                  </div>
+   640→                  <Button size="sm" onClick={handleExportExcel} className="bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs gap-1.5">
+   641→                    <Download className="w-3.5 h-3.5" /> Descargar reporte .xlsx
+   642→                  </Button>
+   643→                </div>
+   644→              </CardHeader>
+   645→              <CardContent className="p-0">
+   646→                <ScrollArea className="h-[420px]">
+   647→                  <Table>
+   648→                    <TableHeader>
+   649→                      <TableRow className="border-slate-800/50 hover:bg-transparent">
+   650→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider">Nro. Orden</TableHead>
+   651→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider">Equipo</TableHead>
+   652→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider hidden lg:table-cell">Nombre Equipo</TableHead>
+   653→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider">Tarea</TableHead>
+   654→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider hidden md:table-cell">Estado</TableHead>
+   655→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider">Tipo</TableHead>
+   656→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider hidden xl:table-cell">Detalle</TableHead>
+   657→                      </TableRow>
+   658→                    </TableHeader>
+   659→                    <TableBody>
+   660→                      {results.map((r, i) => (
+   661→                        <TableRow key={i} className="border-slate-800/30 hover:bg-slate-800/20">
+   662→                          <TableCell className="font-mono text-xs text-amber-300/80">{esc(r['Nro. Orden'])}</TableCell>
+   663→                          <TableCell className="font-mono text-xs">{esc(r['Equipo'])}</TableCell>
+   664→                          <TableCell className="text-xs text-slate-400 hidden lg:table-cell">{esc(r['Nombre Equipo'])}</TableCell>
+   665→                          <TableCell className="text-xs max-w-[200px] truncate" title={r['Tarea']}>{esc(r['Tarea'])}</TableCell>
+   666→                          <TableCell className="text-xs text-slate-400 hidden md:table-cell">{esc(r['Estado Tarea'])}</TableCell>
+   667→                          <TableCell><HallazgoBadge tipo={r['Tipo de Hallazgo']} /></TableCell>
+   668→                          <TableCell className="text-xs text-slate-500 max-w-[250px] truncate hidden xl:table-cell" title={r['Detalle']}>{esc(r['Detalle'])}</TableCell>
+   669→                        </TableRow>
+   670→                      ))}
+   671→                    </TableBody>
+   672→                  </Table>
+   673→                </ScrollArea>
+   674→              </CardContent>
+   675→            </Card>
+   676→          </section>
+   677→        )}
+   678→
+   679→        {/* Section 3: AI Analysis */}
+   680→        {hasResults && (
+   681→          <section>
+   682→            <div className="flex items-center gap-3 mb-4">
+   683→              <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 text-sm font-bold font-mono">3</div>
+   684→              <h2 className="text-base font-semibold text-slate-200">Análisis avanzado de causa raíz con IA (Groq)</h2>
+   685→            </div>
+   686→            <Card className="border-slate-800/50 bg-slate-900/30">
+   687→              <CardContent className="p-5 space-y-4">
+   688→                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   689→                  <div className="space-y-2">
+   690→                    <Label className="text-xs text-slate-400">Groq API Key</Label>
+   691→                    <Input
+   692→                      type="password"
+   693→                      placeholder="gsk_..."
+   694→                      value={groqKey}
+   695→                      onChange={e => setGroqKey(e.target.value)}
+   696→                      className="bg-slate-800/50 border-slate-700/50 font-mono text-sm"
+   697→                    />
+   698→                  </div>
+   699→                  <div className="space-y-2">
+   700→                    <Label className="text-xs text-slate-400">Modelo de IA</Label>
+   701→                    <Select value={groqModel} onValueChange={setGroqModel}>
+   702→                      <SelectTrigger className="bg-slate-800/50 border-slate-700/50 text-sm">
+   703→                        <SelectValue />
+   704→                      </SelectTrigger>
+   705→                      <SelectContent className="bg-slate-800 border-slate-700">
+   706→                        <SelectItem value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</SelectItem>
+   707→                        <SelectItem value="llama-3.1-8b-instant">llama-3.1-8b-instant</SelectItem>
+   708→                        <SelectItem value="qwen/qwen3.6-27b">qwen/qwen3.6-27b</SelectItem>
+   709→                        <SelectItem value="openai/gpt-oss-120b">openai/gpt-oss-120b</SelectItem>
+   710→                      </SelectContent>
+   711→                    </Select>
+   712→                  </div>
+   713→                </div>
+   714→                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end">
+   715→                  <div className="space-y-2">
+   716→                    <Label className="text-xs text-slate-400">Orden crítica a auditar</Label>
+   717→                    <Select value={selectedOrder} onValueChange={setSelectedOrder}>
+   718→                      <SelectTrigger className="bg-slate-800/50 border-slate-700/50 font-mono text-sm">
+   719→                        <SelectValue placeholder="Seleccioná una orden..." />
+   720→                      </SelectTrigger>
+   721→                      <SelectContent className="bg-slate-800 border-slate-700 max-h-60">
+   722→                        {uniqueOrders.map(o => (
+   723→                          <SelectItem key={o} value={o} className="font-mono text-xs">OM {o}</SelectItem>
+   724→                        ))}
+   725→                      </SelectContent>
+   726→                    </Select>
+   727→                  </div>
+   728→                  <Button
+   729→                    onClick={handleAnalyzeIA}
+   730→                    disabled={!groqKey || !selectedOrder || aiAnalyzeLoading}
+   731→                    className="bg-amber-500 hover:bg-amber-400 text-black font-semibold gap-2 h-10"
+   732→                  >
+   733→                    {aiAnalyzeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+   734→                    Analizar con IA
+   735→                  </Button>
+   736→                </div>
+   737→                {aiResult && (
+   738→                  <div className={`rounded-lg p-4 text-sm leading-relaxed ${
+   739→                    aiResult.type === 'loading' ? 'bg-slate-800/50 text-slate-400' :
+   740→                    aiResult.type === 'error' ? 'bg-red-500/10 border border-red-500/30 text-red-300' :
+   741→                    aiResult.type === 'warn' ? 'bg-orange-500/10 border border-orange-500/30 text-orange-300' :
+   742→                    'bg-slate-800/30 border border-slate-700/50 text-slate-200 whitespace-pre-wrap'
+   743→                  }`}>
+   744→                    {aiResult.type === 'loading' && <Loader2 className="w-4 h-4 animate-spin inline mr-2" />}
+   745→                    {aiResult.type === 'result' && <><Bot className="w-4 h-4 inline mr-2 text-amber-400" /><strong className="text-amber-400">Diagnóstico de la IA:</strong>{'\n\n'}{aiResult.text}</>}
+   746→                    {aiResult.type !== 'result' && aiResult.text}
+   747→                  </div>
+   748→                )}
+   749→              </CardContent>
+   750→            </Card>
+   751→          </section>
+   752→        )}
+   753→
+   754→        {/* Section 4: Learning */}
+   755→        {hasResults && (
+   756→          <section>
+   757→            <div className="flex items-center gap-3 mb-4">
+   758→              <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 text-sm font-bold font-mono">4</div>
+   759→              <h2 className="text-base font-semibold text-slate-200">Aprendizaje asistido por IA</h2>
+   760→            </div>
+   761→            <Card className="border-slate-800/50 bg-slate-900/30">
+   762→              <CardHeader className="pb-3">
+   763→                <CardDescription className="text-xs text-slate-400 leading-relaxed">
+   764→                  Tareas que piden un cambio de repuesto cuyo nombre todavía no está en el diccionario.
+   765→                  La IA sugiere a qué categoría pertenecen — revisá y elegí cuáles sumar.
+   766→                </CardDescription>
+   767→              </CardHeader>
+   768→              <CardContent className="p-5 pt-0 space-y-4">
+   769→                <div className="flex items-center justify-between flex-wrap gap-3">
+   770→                  <Badge variant="outline" className="text-xs font-mono border-slate-700 text-slate-400">
+   771→                    {unrecognizedTasks.length} tarea(s) sin categoría reconocida
+   772→                  </Badge>
+   773→                  <div className="flex gap-2 flex-wrap">
+   774→                    <Button variant="outline" size="sm" onClick={handleExportDict} className="text-xs gap-1.5 border-slate-700 hover:border-slate-500">
+   775→                      <Download className="w-3.5 h-3.5" /> Exportar diccionario
+   776→                    </Button>
+   777→                    <label className="inline-flex items-center cursor-pointer">
+   778→                      <Button variant="outline" size="sm" className="text-xs gap-1.5 border-slate-700 hover:border-slate-500 pointer-events-none" asChild>
+   779→                        <span><Download className="w-3.5 h-3.5 rotate-180" /> Importar diccionario</span>
+   780→                      </Button>
+   781→                      <input type="file" accept=".json" onChange={handleImportDict} className="hidden" />
+   782→                    </label>
+   783→                    <Button
+   784→                      size="sm"
+   785→                      onClick={handleAnalyzeDict}
+   786→                      disabled={!groqKey || unrecognizedTasks.length === 0 || aiDictLoading}
+   787→                      className="bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs gap-1.5"
+   788→                    >
+   789→                      {aiDictLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+   790→                      Analizar con IA
+   791→                    </Button>
+   792→                  </div>
+   793→                </div>
+   794→
+   795→                {/* Unrecognized tasks table */}
+   796→                <ScrollArea className="h-[160px]">
+   797→                  <Table>
+   798→                    <TableHeader>
+   799→                      <TableRow className="border-slate-800/50 hover:bg-transparent">
+   800→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider">Tarea (sin categoría)</TableHead>
+   801→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider w-20">Apariciones</TableHead>
+   802→                        <TableHead className="bg-slate-800/80 text-slate-300 text-[11px] uppercase tracking-wider w-24">Ej. Orden</TableHead>
+   803→                      </TableRow>
+   804→                    </TableHeader>
+   805→                    <TableBody>
+   806→                      {unrecognizedTasks.length === 0 ? (
+   807→                        <TableRow><TableCell colSpan={3} className="text-center text-slate-500 text-xs py-8">Todas las tareas coinciden con alguna categoría del diccionario.</TableCell></TableRow>
+   808→                      ) : (
+   809→                        unrecognizedTasks.map((u, i) => (
+   810→                          <TableRow key={i} className="border-slate-800/30 hover:bg-slate-800/20">
+   811→                            <TableCell className="font-mono text-xs">{esc(u.tarea)}</TableCell>
+   812→                            <TableCell className="font-mono text-xs text-amber-400">{u.count}</TableCell>
+   813→                            <TableCell className="font-mono text-xs text-slate-400">{esc(u.order)}</TableCell>
+   814→                          </TableRow>
+   815→                        ))
+   816→                      )}
+   817→                    </TableBody>
+   818→                  </Table>
+   819→                </ScrollArea>
+   820→
+   821→                {/* AI Suggestions */}
+   822→                {suggestions.length > 0 && (
+   823→                  <div className="space-y-3 mt-2">
+   824→                    <p className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+   825→                      <Lightbulb className="w-3.5 h-3.5 text-amber-400" /> Sugerencias de la IA — revisá y ajustá antes de guardar
+   826→                    </p>
+   827→                    {suggestions.map((s, i) => (
+   828→                      <SuggestionCard key={i} suggestion={s} index={i} onUpdate={(updated) => {
+   829→                        setEditedSuggestions(prev => {
+   830→ const next = [...prev];
+   831→                          next[i] = updated;
+   832→                          return next;
+   833→                        });
+   834→                      }} />
+   835→                    ))}
+   836→                    <Button onClick={handleSaveSuggestions} className="bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs gap-1.5">
+   837→                      Guardar seleccionadas en el diccionario
+   838→                    </Button>
+   839→                  </div>
+   840→                )}
+   841→
+   842→                {/* Custom dictionary */}
+   843→                <Separator className="bg-slate-800/50" />
+   844→                <div>
+   845→                  <div className="flex items-center justify-between mb-3">
+   846→                    <p className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+   847→                      <BookOpen className="w-3.5 h-3.5" /> Diccionario aprendido en este navegador
+   848→                    </p>
+   849→                    <Button variant="ghost" size="sm" onClick={handleClearDict} className="text-xs text-slate-500 hover:text-red-400 gap-1">
+   850→                      <Trash2 className="w-3 h-3" /> Vaciar
+   851→                    </Button>
+   852→                  </div>
+   853→                  {Object.keys(customDict).length === 0 ? (
+   854→                    <p className="text-xs text-slate-600 italic">Todavía no se aprendió ninguna categoría nueva.</p>
+   855→                  ) : (
+   856→                    <div className="flex flex-wrap gap-2">
+   857→                      {Object.entries(customDict).map(([cat, syns]) => (
+   858→                        <Badge key={cat} variant="outline" className="border-slate-700/50 bg-slate-800/30 px-3 py-1.5 gap-2 text-xs">
+   859→                          <span className="font-semibold text-amber-400 font-mono">{cat}</span>
+   860→                          <span className="text-slate-500 font-mono">{syns.join(', ')}</span>
+   861→                          <button onClick={() => handleDeleteDictEntry(cat)} className="text-red-400/60 hover:text-red-400 font-bold ml-1">✕</button>
+   862→                        </Badge>
+   863→                      ))}
+   864→                    </div>
+   865→                  )}
+   866→                </div>
+   867→              </CardContent>
+   868→            </Card>
+   869→          </section>
+   870→        )}
+   871→      </main>
+   872→
+   873→      {/* Footer */}
+   874→      <footer className="mt-auto border-t border-slate-800/50 py-4">
+   875→        <p className="text-center text-[10px] text-slate-600 font-mono tracking-wider uppercase">
+   876→          Desarrollado para optimización y control logístico de flotas · Corre 100% local en el navegador
+   877→        </p>
+   878→      </footer>
+   879→    </div>
+   880→  );
+   881→}
+   882→
+   883→/* =================== SUGGESTION CARD (with local state) =================== */
+   884→
+   885→function SuggestionCard({ suggestion, index, onUpdate }: { suggestion: AISuggestion; index: number; onUpdate: (updated: AISuggestion) => void }) {
+   886→  const [cat, setCat] = useState(up(suggestion.categoria || ''));
+   887→  const [syns, setSyns] = useState((suggestion.sinonimos || []).map(x => up(x)).join(', '));
+   888→  const [checked, setChecked] = useState(true);
+   889→
+   890→  useEffect(() => {
+   891→    onUpdate({ ...suggestion, categoria: cat, sinonimos: syns.split(',').map(x => x.trim()).filter(Boolean) });
+   892→  }, [cat, syns]);
+   893→
+   894→  return (
+   895→    <Card className="border-slate-700/50 bg-slate-800/30">
+   896→      <CardContent className="p-4">
+   897→        <p className="font-mono text-xs text-slate-400 mb-3 break-words">&quot;{esc(suggestion.tarea)}&quot;</p>
+   898→        <div className="grid grid-cols-[auto_1fr] gap-3 items-center">
+   899→          <Checkbox checked={checked} onCheckedChange={(v) => setChecked(!!v)} className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500" />
+   900→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   901→            <Input
+   902→              value={cat}
+   903→              onChange={e => setCat(up(e.target.value))}
+   904→              placeholder="CATEGORÍA"
+   905→              className="font-mono text-xs bg-slate-900/50 border-slate-700/50 h-8"
+   906→            />
+   907→            <Input
+   908→              value={syns}
+   909→              onChange={e => setSyns(e.target.value)}
+   910→              placeholder="Sinónimos separados por coma"
+   911→              className="font-mono text-xs bg-slate-900/50 border-slate-700/50 h-8"
+   912→            />
+   913→          </div>
+   914→        </div>
+   915→      </CardContent>
+   916→    </Card>
+   917→  );
+   918→}
