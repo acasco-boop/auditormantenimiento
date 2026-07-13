@@ -1,0 +1,1120 @@
+     1→<!DOCTYPE html>
+     2→<html lang="es">
+     3→<head>
+     4→<meta charset="UTF-8">
+     5→<meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6→<title>Auditoría de Mantenimiento & Stock — IA</title>
+     7→<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+     8→<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+     9→<style>
+    10→  :root{
+    11→    --navy-950:#0b1520;
+    12→    --navy-900:#0f2136;
+    13→    --navy-800:#15304d;
+    14→    --navy-700:#1f497d;
+    15→    --steel-500:#3d6a94;
+    16→    --steel-300:#7ea3c4;
+    17→    --paper:#eef1f4;
+    18→    --paper-dim:#c9d3dc;
+    19→    --amber:#e8b923;
+    20→    --amber-dim:#3a331a;
+    21→    --orange:#e07a3f;
+    22→    --orange-dim:#3a2618;
+    23→    --green:#5ea86f;
+    24→    --green-dim:#1c3324;
+    25→    --danger:#d9564a;
+    26→    --mono: 'IBM Plex Mono', 'Consolas', monospace;
+    27→    --sans: 'IBM Plex Sans', 'Segoe UI', Arial, sans-serif;
+    28→  }
+    29→  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+    30→
+    31→  *{box-sizing:border-box;}
+    32→  html,body{margin:0;padding:0;}
+    33→  body{
+    34→    background:
+    35→      radial-gradient(circle at 15% 0%, rgba(31,73,125,.35), transparent 40%),
+    36→      linear-gradient(180deg, var(--navy-950), #081019 60%);
+    37→    color:var(--paper);
+    38→    font-family:var(--sans);
+    39→    min-height:100vh;
+    40→    padding:28px 24px 60px;
+    41→  }
+    42→  .wrap{max-width:1180px;margin:0 auto;}
+    43→
+    44→  /* header */
+    45→  .plate{
+    46→    display:flex;align-items:center;gap:18px;
+    47→    border:1px solid rgba(126,163,196,.25);
+    48→    background:linear-gradient(135deg, rgba(31,73,125,.35), rgba(15,33,54,.4));
+    49→    border-radius:10px;padding:20px 24px;margin-bottom:22px;
+    50→    position:relative;overflow:hidden;
+    51→  }
+    52→  .plate::before{
+    53→    content:"";position:absolute;inset:0;
+    54→    background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.025) 0 2px, transparent 2px 14px);
+    55→    pointer-events:none;
+    56→  }
+    57→  .rivet{width:46px;height:46px;border-radius:50%;flex:none;
+    58→    background:radial-gradient(circle at 35% 30%, #ffd66b, var(--amber) 55%, #8a6a10 100%);
+    59→    box-shadow:inset 0 -3px 6px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.5);
+    60→    display:flex;align-items:center;justify-content:center;font-size:20px;
+    61→  }
+    62→  .plate h1{font-size:19px;margin:0 0 4px;letter-spacing:.04em;font-weight:700;text-transform:uppercase;}
+    63→  .plate p{margin:0;color:var(--paper-dim);font-size:13px;max-width:720px;line-height:1.5;}
+    64→  .tag{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--steel-300);text-transform:uppercase;}
+    65→
+    66→  /* panels */
+    67→  .panel{
+    68→    border:1px solid rgba(126,163,196,.18);
+    69→    background:rgba(15,33,54,.55);
+    70→    border-radius:10px;
+    71→    padding:20px 22px;
+    72→    margin-bottom:20px;
+    73→  }
+    74→  .panel > h2{
+    75→    font-size:13px;text-transform:uppercase;letter-spacing:.09em;
+    76→    color:var(--steel-300);margin:0 0 16px;font-weight:600;
+    77→    display:flex;align-items:center;gap:10px;
+    78→  }
+    79→  .panel > h2 .num{
+    80→    font-family:var(--mono);background:var(--navy-700);color:var(--paper);
+    81→    width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;
+    82→  }
+    83→
+    84→  /* uploaders */
+    85→  .uploaders{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;}
+    86→  .uploader{
+    87→    border:1.5px dashed rgba(126,163,196,.35);border-radius:8px;padding:16px;
+    88→    background:rgba(11,21,32,.4);transition:.15s;cursor:pointer;position:relative;
+    89→  }
+    90→  .uploader:hover{border-color:var(--amber);background:rgba(232,185,35,.06);}
+    91→  .uploader.filled{border-color:var(--green);background:rgba(94,168,111,.08);border-style:solid;}
+    92→  .uploader input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+    93→  .uploader .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel-300);font-weight:600;margin-bottom:6px;}
+    94→  .uploader .fname{font-family:var(--mono);font-size:12.5px;color:var(--paper);word-break:break-all;}
+    95→  .uploader .hint{font-size:11px;color:var(--paper-dim);margin-top:4px;}
+    96→
+    97→  /* sidebar-style config row */
+    98→  .cfg{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end;}
+    99→  label.f{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--steel-300);font-weight:600;margin-bottom:6px;}
+   100→  input[type=password], input[type=text], select{
+   101→    width:100%;padding:10px 12px;background:var(--navy-950);
+   102→    border:1px solid rgba(126,163,196,.3);border-radius:6px;color:var(--paper);
+   103→    font-family:var(--mono);font-size:13px;outline:none;
+   104→  }
+   105→  input[type=password]:focus, select:focus{border-color:var(--amber);}
+   106→
+   107→  button{
+   108→    font-family:var(--sans);font-weight:600;font-size:13px;letter-spacing:.03em;
+   109→    border:none;border-radius:6px;padding:11px 18px;cursor:pointer;transition:.15s;
+   110→  }
+   111→  .btn-primary{background:var(--amber);color:#1a1400;}
+   112→  .btn-primary:hover{background:#f5cc3d;}
+   113→  .btn-primary:disabled{background:#5a5230;color:#8a8264;cursor:not-allowed;}
+   114→  .btn-ghost{background:transparent;border:1px solid rgba(126,163,196,.4);color:var(--paper);}
+   115→  .btn-ghost:hover{border-color:var(--steel-300);background:rgba(126,163,196,.08);}
+   116→
+   117→  /* metrics */
+   118→  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+   119→  .metric{border-radius:8px;padding:16px 18px;border:1px solid rgba(126,163,196,.18);}
+   120→  .metric .n{font-family:var(--mono);font-size:30px;font-weight:600;line-height:1;}
+   121→  .metric .l{font-size:12px;color:var(--paper-dim);margin-top:6px;}
+   122→  .metric.m1{background:linear-gradient(135deg, var(--amber-dim), rgba(15,33,54,.4));border-color:rgba(232,185,35,.35);}
+   123→  .metric.m1 .n{color:var(--amber);}
+   124→  .metric.m2{background:linear-gradient(135deg, var(--orange-dim), rgba(15,33,54,.4));border-color:rgba(224,122,63,.35);}
+   125→  .metric.m2 .n{color:var(--orange);}
+   126→  .metric.m3{background:linear-gradient(135deg, var(--green-dim), rgba(15,33,54,.4));border-color:rgba(94,168,111,.35);}
+   127→  .metric.m3 .n{color:var(--green);}
+   128→
+   129→  /* metric breakdown detail */
+   130→  .metric .detail{margin-top:10px;padding-top:10px;border-top:1px solid rgba(126,163,196,.15);font-size:11px;color:var(--paper-dim);line-height:1.6;}
+   131→  .metric .detail .detail-row{display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;}
+   132→  .metric .detail .detail-row .label{color:var(--paper-dim);}
+   133→  .metric .detail .detail-row .value{font-family:var(--mono);font-weight:600;font-size:13px;}
+   134→  .metric.m1 .detail .value{color:var(--amber);}
+   135→  .metric.m2 .detail .value{color:var(--orange);}
+   136→  .metric.m3 .detail .value{color:var(--green);}
+   137→  .metric .detail .warehouse-title{margin-top:8px;margin-bottom:4px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--steel-300);font-weight:600;}
+   138→  .metric .detail .wh-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;}
+   139→  .metric .detail .wh-row .wh-name{font-family:var(--mono);font-size:11px;color:var(--paper);}
+   140→  .metric .detail .wh-row .wh-bar-wrap{flex:1;height:6px;background:rgba(126,163,196,.1);border-radius:3px;margin:0 10px;min-width:60px;}
+   141→  .metric .detail .wh-row .wh-bar{height:100%;border-radius:3px;transition:width .4s ease;}
+   142→  .metric.m1 .wh-bar{background:var(--amber);}
+   143→  .metric.m2 .wh-bar{background:var(--orange);}
+   144→  .metric.m3 .wh-bar{background:var(--green);}
+   145→  .metric .detail .wh-row .wh-count{font-family:var(--mono);font-size:11px;font-weight:600;min-width:30px;text-align:right;}
+   146→  .metric.m1 .wh-count{color:var(--amber);}
+   147→  .metric.m2 .wh-count{color:var(--orange);}
+   148→  .metric.m3 .wh-count{color:var(--green);}
+   149→  .metric .detail .na-msg{font-style:italic;opacity:.7;margin-top:4px;}
+   150→
+   151→  /* table */
+   152→  .tbl-scroll{overflow:auto;max-height:560px;border-radius:8px;border:1px solid rgba(126,163,196,.18);}
+   153→  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+   154→  thead th{
+   155→    position:sticky;top:0;background:var(--navy-700);color:#fff;text-align:left;
+   156→    padding:10px 12px;font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em;
+   157→    border-bottom:2px solid rgba(0,0,0,.2);white-space:nowrap;
+   158→  }
+   159→  tbody td{padding:9px 12px;border-bottom:1px solid rgba(126,163,196,.12);vertical-align:top;}
+   160→  tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
+   161→  tbody tr:hover{background:rgba(126,163,196,.08);}
+   162→  .badge{display:inline-block;padding:3px 8px;border-radius:4px;font-family:var(--mono);font-size:11px;white-space:nowrap;}
+   163→  .badge.h1{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(232,185,35,.4);}
+   164→  .badge.h2{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(224,122,63,.4);}
+   165→  .badge.h3{background:var(--green-dim);color:var(--green);border:1px solid rgba(94,168,111,.4);}
+   166→
+   167→  .empty{color:var(--paper-dim);font-size:13px;padding:8px 2px;}
+   168→  .row-flex{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between;margin-bottom:14px;}
+   169→
+   170→  .ai-box{border:1px solid rgba(126,163,196,.25);border-radius:8px;padding:16px;background:rgba(11,21,32,.5);margin-top:14px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;}
+   171→  .ai-box.loading{color:var(--paper-dim);font-family:var(--mono);}
+   172→  .warn{color:var(--paper-dim);font-size:13px;background:rgba(224,122,63,.08);border:1px solid rgba(224,122,63,.3);border-radius:6px;padding:12px 14px;}
+   173→  .err{color:#ffb4ac;font-size:13px;background:rgba(217,86,74,.1);border:1px solid rgba(217,86,74,.4);border-radius:6px;padding:12px 14px;}
+   174→
+   175→  .sugg-card{border:1px solid rgba(126,163,196,.25);border-radius:8px;padding:14px 16px;margin-bottom:10px;background:rgba(11,21,32,.5);}
+   176→  .sugg-card .sugg-tarea{font-family:var(--mono);font-size:12px;color:var(--steel-300);margin-bottom:10px;word-break:break-word;}
+   177→  .sugg-row{display:grid;grid-template-columns:auto 160px 1fr;gap:10px;align-items:center;}
+   178→  .sugg-row input[type=text]{font-family:var(--mono);}
+   179→  .sugg-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--amber);}
+   180→  .dict-chip{display:inline-flex;align-items:center;gap:8px;background:rgba(126,163,196,.1);border:1px solid rgba(126,163,196,.25);border-radius:6px;padding:6px 10px;margin:0 8px 8px 0;font-family:var(--mono);font-size:12px;}
+   181→  .dict-chip .del{cursor:pointer;color:var(--danger);font-weight:700;}
+   182→  .dict-chip .syns{color:var(--paper-dim);}
+   183→
+   184→  footer{text-align:center;color:var(--paper-dim);font-size:11.5px;margin-top:30px;font-family:var(--mono);}
+   185→</style>
+   186→</head>
+   187→<body>
+   188→<div class="wrap">
+   189→
+   190→  <div class="plate">
+   191→    <div class="rivet">🔧</div>
+   192→    <div>
+   193→      <div class="tag">Panel de control · Taller & Pañol</div>
+   194→      <h1>Auditoría de Mantenimiento &amp; Control de Stock con IA</h1>
+   195→      <p>Cargá las planillas del mes para detectar desvíos de pañol e inconsistencias operativas de forma automática. Corre entero en tu navegador — no requiere instalar Python en esta PC.</p>
+   196→    </div>
+   197→  </div>
+   198→
+   199→  <div class="panel">
+   200→    <h2><span class="num">1</span> Cargar planillas de datos</h2>
+   201→    <div class="uploaders">
+   202→      <div class="uploader" id="up-tar">
+   203→        <input type="file" id="file-tar" accept=".xlsx,.csv">
+   204→        <div class="lbl">Tareas (Excel o CSV)</div>
+   205→        <div class="fname" id="fname-tar">Ningún archivo seleccionado</div>
+   206→        <div class="hint">Debe tener columna DocNum o Nro. Orden</div>
+   207→      </div>
+   208→      <div class="uploader" id="up-mat">
+   209→        <input type="file" id="file-mat" accept=".xlsx,.csv">
+   210→        <div class="lbl">Materiales (Excel o CSV)</div>
+   211→        <div class="fname" id="fname-mat">Ningún archivo seleccionado</div>
+   212→        <div class="hint">Debe tener columna Nro. OM o Nro. Orden</div>
+   213→      </div>
+   214→      <div class="uploader" id="up-ov">
+   215→        <input type="file" id="file-ov" accept=".xlsx,.csv">
+   216→        <div class="lbl">Órdenes de venta (opcional)</div>
+   217→        <div class="fname" id="fname-ov">Ningún archivo seleccionado</div>
+   218→        <div class="hint">Planilla complementaria de facturación</div>
+   219→      </div>
+   220→    </div>
+   221→    <div id="load-status" style="margin-top:14px;"></div>
+   222→  </div>
+   223→
+   224→  <div class="panel" id="panel-resultados" style="display:none;">
+   225→    <h2><span class="num">2</span> Resumen de incoherencias encontradas</h2>
+   226→    <div class="metrics">
+   227→      <div class="metric m1">
+   228→        <div class="n" id="m1">0</div>
+   229→        <div class="l">Sin repuestos asignados</div>
+   230→        <div class="detail" id="m1-detail"></div>
+   231→      </div>
+   232→      <div class="metric m2">
+   233→        <div class="n" id="m2">0</div>
+   234→        <div class="l">Desconexión / cruce erróneo</div>
+   235→        <div class="detail" id="m2-detail"></div>
+   236→      </div>
+   237→      <div class="metric m3">
+   238→        <div class="n" id="m3">0</div>
+   239→        <div class="l">Planificados con Salida = 0</div>
+   240→        <div class="detail" id="m3-detail"></div>
+   241→      </div>
+   242→    </div>
+   243→
+   244→    <div class="row-flex" style="margin-top:20px;">
+   245→      <div class="tag">Detalle de hallazgos</div>
+   246→      <button class="btn-primary" id="btn-download">📥 Descargar reporte auditado (.xlsx)</button>
+   247→    </div>
+   248→
+   249→    <div class="tbl-scroll">
+   250→      <table>
+   251→        <thead>
+   252→          <tr>
+   253→            <th>Nro. Orden</th><th>Equipo</th><th>Nombre Equipo</th><th>Tarea</th>
+   254→            <th>Estado Tarea</th><th>Tipo de Hallazgo</th><th>Detalle</th>
+   255→          </tr>
+   256→        </thead>
+   257→        <tbody id="tbody-results"></tbody>
+   258→      </table>
+   259→    </div>
+   260→  </div>
+   261→
+   262→  <div class="panel" id="panel-ia" style="display:none;">
+   263→    <h2><span class="num">3</span> Análisis avanzado de causa raíz con IA (Groq)</h2>
+   264→    <div class="cfg">
+   265→      <div>
+   266→        <label class="f">Groq API Key</label>
+   267→        <input type="password" id="groq-key" placeholder="gsk_...">
+   268→      </div>
+   269→      <div>
+   270→        <label class="f">Modelo de IA</label>
+   271→        <select id="groq-model">
+   272→          <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile — reemplazo de Llama 3 70B</option>
+   273→          <option value="llama-3.1-8b-instant">llama-3.1-8b-instant — ultra veloz</option>
+   274→          <option value="qwen/qwen3.6-27b">qwen/qwen3.6-27b — razonamiento lógico</option>
+   275→          <option value="openai/gpt-oss-120b">openai/gpt-oss-120b — máxima capacidad</option>
+   276→        </select>
+   277→      </div>
+   278→    </div>
+   279→    <div class="cfg" style="margin-top:14px;">
+   280→      <div>
+   281→        <label class="f">Orden crítica a auditar</label>
+   282→        <select id="orden-select"></select>
+   283→      </div>
+   284→      <div>
+   285→        <button class="btn-primary" id="btn-analizar" style="width:100%;">🤖 Analizar con Groq IA</button>
+   286→      </div>
+   287→    </div>
+   288→    <div id="ai-result"></div>
+   289→  </div>
+   290→
+   291→  <div class="panel" id="panel-learning" style="display:none;">
+   292→    <h2><span class="num">4</span> Aprendizaje asistido por IA — repuestos no reconocidos</h2>
+   293→    <p style="color:var(--paper-dim);font-size:13px;margin:-6px 0 16px;line-height:1.5;">
+   294→      Tareas que piden explícitamente un cambio de repuesto, pero cuyo nombre todavía no está en el
+   295→      diccionario (de fábrica + aprendido), así que hoy no se cruzan contra el pañol. La IA sugiere a
+   296→      qué categoría pertenecen y con qué palabras buscarlas — vos revisás y elegís cuáles sumar.
+   297→    </p>
+   298→    <div class="row-flex">
+   299→      <div class="tag" id="unrecognized-count">0 tareas sin categoría reconocida</div>
+   300→      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+   301→        <button class="btn-ghost" id="btn-dict-export">📤 Exportar diccionario aprendido</button>
+   302→        <label class="btn-ghost" style="display:inline-flex;align-items:center;cursor:pointer;">
+   303→          📥 Importar diccionario
+   304→          <input type="file" id="dict-import-input" accept=".json" style="display:none;">
+   305→        </label>
+   306→        <button class="btn-primary" id="btn-analizar-dict">🧠 Analizar con IA y sugerir categorías</button>
+   307→      </div>
+   308→    </div>
+   309→
+   310→    <div class="tbl-scroll" style="max-height:220px;margin-bottom:18px;">
+   311→      <table>
+   312→        <thead><tr><th>Tarea (sin categoría reconocida)</th><th>Apariciones</th><th>Ej. Orden</th></tr></thead>
+   313→        <tbody id="unrecognized-tbody"><tr><td colspan="3" class="empty">Nada para mostrar todavía.</td></tr></tbody>
+   314→      </table>
+   315→    </div>
+   316→
+   317→    <div id="suggestions-box"></div>
+   318→
+   319→    <div style="margin-top:22px;">
+   320→      <div class="row-flex" style="margin-bottom:10px;">
+   321→        <div class="tag">Diccionario aprendido en este navegador</div>
+   322→        <button class="btn-ghost" id="btn-dict-clear">🗑️ Vaciar diccionario aprendido</button>
+   323→      </div>
+   324→      <div id="custom-dict-list" class="empty">Todavía no se aprendió ninguna categoría nueva.</div>
+   325→    </div>
+   326→  </div>
+   327→
+   328→  <footer>DESARROLLADO PARA OPTIMIZACIÓN Y CONTROL LOGÍSTICO DE FLOTAS · CORRE 100% LOCAL EN EL NAVEGADOR</footer>
+   329→</div>
+   330→
+   331→<script>
+   332→/* ============ Utilidades de lectura de archivos ============ */
+   333→function readFileAsArrayBuffer(file){
+   334→  return new Promise((res, rej)=>{
+   335→    const r = new FileReader();
+   336→    r.onload = ()=>res(r.result);
+   337→    r.onerror = rej;
+   338→    r.readAsArrayBuffer(file);
+   339→  });
+   340→}
+   341→function readFileAsText(file){
+   342→  return new Promise((res, rej)=>{
+   343→    const r = new FileReader();
+   344→    r.onload = ()=>res(r.result);
+   345→    r.onerror = rej;
+   346→    r.readAsText(file, 'utf-8');
+   347→  });
+   348→}
+   349→
+   350→// Devuelve array de objetos (filas) a partir de un File .xlsx o .csv
+   351→async function parseTabularFile(file){
+   352→  const name = file.name.toLowerCase();
+   353→  if(name.endsWith('.csv')){
+   354→    const text = await readFileAsText(file);
+   355→    const parsed = Papa.parse(text, {header:true, skipEmptyLines:true, dynamicTyping:true});
+   356→    return parsed.data;
+   357→  } else {
+   358→    const buf = await readFileAsArrayBuffer(file);
+   359→    const wb = new ExcelJS.Workbook();
+   360→    await wb.xlsx.load(buf);
+   361→    const ws = wb.worksheets[0];
+   362→    const rows = [];
+   363→    let headers = [];
+   364→    ws.eachRow((row, rowNumber)=>{
+   365→      const values = row.values.slice(1); // exceljs es 1-indexed, values[0] es undefined
+   366→      if(rowNumber === 1){
+   367→        headers = values.map(v => (v===undefined||v===null) ? '' : String(v).trim());
+   368→      } else {
+   369→        const obj = {};
+   370→        headers.forEach((h, i)=>{
+   371→          let v = values[i];
+   372→          if(v && typeof v === 'object' && v.text !== undefined) v = v.text; // rich text
+   373→          if(v && typeof v === 'object' && v.result !== undefined) v = v.result; // formula
+   374→          obj[h] = (v===undefined) ? null : v;
+   375→        });
+   376→        rows.push(obj);
+   377→      }
+   378→    });
+   379→    return rows;
+   380→  }
+   381→}
+   382→
+   383→/* ============ Estado global ============ */
+   384→let dfTar = null, dfMat = null, results = [];
+   385→let matByOrder = {}; // global: materiales indexados por Nro. Orden
+   386→let unrecognizedTasks = []; // [{tarea, count, order}] — tareas de reemplazo sin categoría reconocida
+   387→let lastSuggestions = [];   // últimas sugerencias de IA pendientes de revisión
+   388→
+   389→/* ============ Diccionario aprendido (persistido en este navegador) ============
+   390→   Se guarda separado del diccionario "de fábrica" (PARTS_TO_CHECK) para poder
+   391→   distinguir siempre qué categorías vinieron con la app y cuáles se agregaron
+   392→   con el módulo de aprendizaje asistido por IA. getActiveParts() combina ambos
+   393→   en tiempo de ejecución.
+   394→============================================================================ */
+   395→const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
+   396→
+   397→function loadCustomDict(){
+   398→  try{
+   399→    const raw = localStorage.getItem(CUSTOM_DICT_KEY);
+   400→    return raw ? JSON.parse(raw) : {};
+   401→  }catch(e){ return {}; }
+   402→}
+   403→function saveCustomDict(dict){
+   404→  try{ localStorage.setItem(CUSTOM_DICT_KEY, JSON.stringify(dict)); }catch(e){ /* almacenamiento no disponible */ }
+   405→}
+   406→let customDict = loadCustomDict();
+   407→
+   408→function getActiveParts(){
+   409→  return {...PARTS_TO_CHECK, ...customDict};
+   410→}
+   411→
+   412→/* ============ Lógica de negocio (mejorada respecto al script original) ============
+   413→   Cambios respecto a la versión anterior:
+   414→   1. Se eliminó el sinónimo genérico 'FRENO' compartido entre PASTILLA y DISCO:
+   415→      antes, si la tarea pedía "cambiar disco de freno" pero el pañol cargaba
+   416→      "pastilla de freno" (repuesto equivocado), el cruce lo daba por válido
+   417→      porque ambos contenían la palabra "FRENO". Ahora cada categoría exige su
+   418→      palabra específica, así se detecta el cruce erróneo real.
+   419→   2. Se amplió la cobertura de categorías para flota de transporte pesado
+   420→      (neumáticos, amortiguadores, embrague, rodamientos, retenes, radiador,
+   421→      alternador, motor de arranque, escobillas, rótulas, etc.)
+   422→   3. Se normalizan acentos/tildes antes de comparar (ver stripAccents), porque
+   423→      los exports de sistemas como SAP suelen perder u omitir tildes de forma
+   424→      inconsistente entre planillas.
+   425→============================================================================ */
+   426→const PARTS_TO_CHECK = {
+   427→  'LAMPARA': ['LAMPARA','FOCO','LED'],
+   428→  'FILTRO': ['FILTRO'],
+   429→  'ACEITE': ['ACEITE','LUBRICANTE'],
+   430→  'CORREA': ['CORREA'],
+   431→  'PASTILLA': ['PASTILLA'],
+   432→  'DISCO': ['DISCO'],
+   433→  'FUSIBLE': ['FUSIBLE'],
+   434→  'MANGUERA': ['MANGUERA','TUBO','TECALAN','ACOPLE'],
+   435→  'BATERIA': ['BATERIA','ACUMULADOR'],
+   436→  'BUJE': ['BUJE'],
+   437→  'OPTICA': ['OPTICA','FARO','VIDRIO'],
+   438→  'ESPEJO': ['ESPEJO'],
+   439→  'REFRIGERANTE': ['REFRIGERANTE','KRIOX'],
+   440→  // --- categorías ampliadas para flota de transporte pesado ---
+   441→  'NEUMATICO': ['NEUMATICO','CUBIERTA','RODADO'],
+   442→  'CAMARA DE AIRE': ['CAMARA DE AIRE'],
+   443→  'AMORTIGUADOR': ['AMORTIGUADOR'],
+   444→  'EMBRAGUE': ['EMBRAGUE','CLUTCH','CRAPODINA'],
+   445→  'RODAMIENTO': ['RODAMIENTO','RULEMAN'],
+   446→  'RETEN': ['RETEN'],
+   447→  'JUNTA': ['JUNTA','EMPAQUETADURA'],
+   448→  'BOMBA DE AGUA': ['BOMBA DE AGUA'],
+   449→  'TERMOSTATO': ['TERMOSTATO'],
+   450→  'ALTERNADOR': ['ALTERNADOR'],
+   451→  'MOTOR DE ARRANQUE': ['MOTOR DE ARRANQUE','ARRANQUE'],
+   452→  'RADIADOR': ['RADIADOR'],
+   453→  'ESCOBILLA': ['ESCOBILLA','LIMPIAPARABRISAS','PLUMILLA'],
+   454→  'ROTULA': ['ROTULA'],
+   455→  'CRUCETA': ['CRUCETA'],
+   456→  'TENSOR': ['TENSOR'],
+   457→  'VALVULA': ['VALVULA'],
+   458→  'CERRADURA': ['CERRADURA'],
+   459→  'BISAGRA': ['BISAGRA'],
+   460→  'PARAGOLPE': ['PARAGOLPE','PARACHOQUE'],
+   461→  'GUARDABARRO': ['GUARDABARRO'],
+   462→  'CADENA': ['CADENA'],
+   463→  'PINON': ['PINON','CORONA'],
+   464→  'COMPRESOR': ['COMPRESOR'],
+   465→  'BOCINA': ['BOCINA','CLAXON']
+   466→};
+   467→
+   468→// Quita tildes y normaliza Ñ->N para evitar falsos negativos por
+   469→// inconsistencias de codificación entre planillas (típico en exports SAP).
+   470→function stripAccents(str){
+   471→  return str
+   472→    .replace(/[ÁÀÄÂ]/g,'A').replace(/[ÉÈËÊ]/g,'E').replace(/[ÍÌÏÎ]/g,'I')
+   473→    .replace(/[ÓÒÖÔ]/g,'O').replace(/[ÚÙÜÛ]/g,'U').replace(/Ñ/g,'N');
+   474→}
+   475→
+   476→function up(v){
+   477→  if(v===null||v===undefined) return '';
+   478→  return stripAccents(String(v).toUpperCase());
+   479→}
+   480→
+   481→function explicitReplacementNeeded(tareaUp){
+   482→  if(!tareaUp) return false;
+   483→  const controlKw = ['CONTROLAR','REVISION','REVISAR','CHEQUEAR','CONTROL'];
+   484→  if(controlKw.some(k=>tareaUp.includes(k)) && tareaUp.includes('SELECTORA')) return false;
+   485→  const revKw = ['REVISION','REVISAR','CHEQUEAR'];
+   486→  if(revKw.some(k=>tareaUp.includes(k))) return false;
+   487→  const actionKw = ['CAMBIAR','REEMPLAZAR','COLOCAR','COLOCACION','INSTALAR','CAMBIO'];
+   488→  return actionKw.some(k=>tareaUp.includes(k));
+   489→}
+   490→
+   491→function normalizeOrderCol(rows, primaryCol, fallbackCol){
+   492→  if(rows.length === 0) return {ok:false};
+   493→  const cols = Object.keys(rows[0]);
+   494→  if(cols.includes(primaryCol)){
+   495→    rows.forEach(r=> r['Nro. Orden'] = r[primaryCol]);
+   496→    return {ok:true};
+   497→  } else if(cols.includes('Nro. Orden')){
+   498→    return {ok:true};
+   499→  }
+   500→  return {ok:false};
+   501→}
+   502→
+   503→function runAudit(){
+   504→  const errBox = document.getElementById('load-status');
+   505→  errBox.innerHTML = '';
+   506→
+   507→  if(!dfTar || !dfMat){ return; }
+   508→
+   509→  const okTar = normalizeOrderCol(dfTar, 'DocNum');
+   510→  if(!okTar.ok){
+   511→    errBox.innerHTML = '<div class="err">No se encontró la columna de Orden (DocNum o Nro. Orden) en el archivo de Tareas.</div>';
+   512→    return;
+   513→  }
+   514→  const okMat = normalizeOrderCol(dfMat, 'Nro. OM');
+   515→  if(!okMat.ok){
+   516→    errBox.innerHTML = '<div class="err">No se encontró la columna de Orden (Nro. OM o Nro. Orden) en el archivo de Materiales.</div>';
+   517→    return;
+   518→  }
+   519→
+   520→  // Materiales indexados por Nro. Orden (global para desglose en métricas)
+   521→  matByOrder = {};
+   522→  dfMat.forEach(r=>{
+   523→    const key = String(r['Nro. Orden']);
+   524→    if(!matByOrder[key]) matByOrder[key] = [];
+   525→    matByOrder[key].push(r);
+   526→  });
+   527→
+   528→  const activeParts = getActiveParts();
+   529→  const unrecognizedMap = {};
+   530→
+   531→  results = [];
+   532→  dfTar.forEach(row=>{
+   533→    const tarea = row['Tarea'] === null || row['Tarea'] === undefined ? '' : String(row['Tarea']);
+   534→    const tareaUp = up(tarea);
+   535→    if(!explicitReplacementNeeded(tareaUp)) return;
+   536→
+   537→    const order = row['Nro. Orden'];
+   538→
+   539→    // Detección de repuestos aún no reconocidos por el diccionario (de fábrica
+   540→    // + aprendido). Se registra independientemente del cruce con materiales,
+   541→    // porque el objetivo es identificar vocabulario nuevo para poder sumarlo.
+   542→    const matchesKnownCategory = Object.keys(activeParts).some(kw => tareaUp.includes(kw));
+   543→    if(!matchesKnownCategory){
+   544→      const key = tareaUp;
+   545→      if(!unrecognizedMap[key]) unrecognizedMap[key] = {tarea, count:0, order};
+   546→      unrecognizedMap[key].count++;
+   547→    }
+   548→
+   549→    const mats = matByOrder[String(order)] || [];
+   550→    const matList = mats.map(m => up(m['Desc. Artículo']));
+   551→    const totalSalidas = mats.reduce((acc,m)=>{
+   552→      const v = parseFloat(m['Salidas']);
+   553→      return acc + (isNaN(v) ? 0 : v);
+   554→    }, 0);
+   555→
+   556→    const base = {
+   557→      'Nro. Orden': order,
+   558→      'Equipo': row['Codigo equipo'],
+   559→      'Nombre Equipo': row['Nombre Equipo'],
+   560→      'Tarea': tarea,
+   561→      'Estado Tarea': row['Estado']
+   562→    };
+   563→
+   564→    if(mats.length === 0){
+   565→      results.push({...base,
+   566→        'Tipo de Hallazgo': '1) Orden sin repuestos asignados',
+   567→        'Detalle': 'Ningún material cargado en la orden'
+   568→      });
+   569→    } else if(totalSalidas === 0){
+   570→      results.push({...base,
+   571→        'Tipo de Hallazgo': '3) Planificado sin Salida física (Salidas = 0)',
+   572→        'Detalle': 'Materiales planificados con Salida Cero: ' + mats.map(m=>m['Desc. Artículo']).join(', ')
+   573→      });
+   574→    } else {
+   575→      // Se revisan TODAS las categorías mencionadas en la tarea (no se corta
+   576→      // en la primera que matchea), así una tarea que pide varios repuestos
+   577→      // (ej. "Cambiar filtro y correa") no queda "aprobada" con que solo uno
+   578→      // de los dos haya sido cargado en el pañol.
+   579→      const missingCategories = [];
+   580→      for(const kw in activeParts){
+   581→        if(tareaUp.includes(kw)){
+   582→          const matsKws = activeParts[kw];
+   583→          const found = matList.some(m => matsKws.some(mk => m.includes(mk)));
+   584→          if(!found) missingCategories.push(kw);
+   585→        }
+   586→      }
+   587→      if(missingCategories.length > 0){
+   588→        results.push({...base,
+   589→          'Tipo de Hallazgo': `2) Desconexión de material (Falta '${missingCategories.join("', '")}')`,
+   590→          'Detalle': 'Materiales cargados no coinciden: ' + mats.map(m=>m['Desc. Artículo']).join(', ')
+   591→        });
+   592→      }
+   593→    }
+   594→  });
+   595→
+   596→  unrecognizedTasks = Object.values(unrecognizedMap).sort((a,b)=>b.count-a.count);
+   597→
+   598→  renderResults();
+   599→  renderUnrecognized();
+   600→  renderCustomDictList();
+   601→}
+   602→
+   603→/* ============ Render de detalle por métrica (OM únicas + almacén) ============ */
+   604→function renderMetricDetail(elId, prefix, count){
+   605→  const el = document.getElementById(elId);
+   606→  if(!el) return;
+   607→
+   608→  const subset = results.filter(r => r['Tipo de Hallazgo'].startsWith(prefix));
+   609→
+   610→  if(count === 0){
+   611→    el.innerHTML = '';
+   612→    return;
+   613→  }
+   614→
+   615→  // OM únicas
+   616→  const uniqueOMs = [...new Set(subset.map(r => r['Nro. Orden']))];
+   617→  const omCount = uniqueOMs.length;
+   618→
+   619→  let html = '';
+   620→  html += '<div class="detail-row"><span class="label">Tareas afectadas</span><span class="value">' + count + '</span></div>';
+   621→  html += '<div class="detail-row"><span class="label">OM únicas</span><span class="value">' + omCount + '</span></div>';
+   622→
+   623→  // Para tipo 1: sin materiales, no hay almacén
+   624→  if(prefix === '1)'){
+   625→    html += '<div class="warehouse-title">Desglose por almacén</div>';
+   626→    html += '<div class="na-msg">No aplica (0 repuestos)</div>';
+   627→    el.innerHTML = html;
+   628→    return;
+   629→  }
+   630→
+   631→  // Para tipos 2 y 3: contar materiales por almacén de las OM afectadas
+   632→  const whCount = {};
+   633→  uniqueOMs.forEach(om => {
+   634→    const mats = matByOrder[String(om)] || [];
+   635→    mats.forEach(m => {
+   636→      const wh = String(m['Almacen'] || 'S/D').trim();
+   637→      if(!wh) return;
+   638→      whCount[wh] = (whCount[wh] || 0) + 1;
+   639→    });
+   640→  });
+   641→
+   642→  const whEntries = Object.entries(whCount).sort((a,b) => b[1] - a[1]);
+   643→  const maxWh = whEntries.length > 0 ? whEntries[0][1] : 1;
+   644→
+   645→  html += '<div class="warehouse-title">Desglose por almacén</div>';
+   646→  whEntries.forEach(([wh, cnt]) => {
+   647→    const pct = Math.round((cnt / maxWh) * 100);
+   648→    html += '<div class="wh-row">'
+   649→      + '<span class="wh-name">' + esc(wh) + '</span>'
+   650→      + '<div class="wh-bar-wrap"><div class="wh-bar" style="width:' + pct + '%"></div></div>'
+   651→      + '<span class="wh-count">' + cnt + '</span>'
+   652→      + '</div>';
+   653→  });
+   654→
+   655→  if(whEntries.length === 0){
+   656→    html += '<div class="na-msg">Sin datos de almacén</div>';
+   657→  }
+   658→
+   659→  el.innerHTML = html;
+   660→}
+   661→
+   662→/* ============ Render de resultados ============ */
+   663→function renderResults(){
+   664→  document.getElementById('panel-resultados').style.display = 'block';
+   665→  document.getElementById('panel-ia').style.display = 'block';
+   666→
+   667→  const c1 = results.filter(r=>r['Tipo de Hallazgo'].startsWith('1)')).length;
+   668→  const c2 = results.filter(r=>r['Tipo de Hallazgo'].startsWith('2)')).length;
+   669→  const c3 = results.filter(r=>r['Tipo de Hallazgo'].startsWith('3)')).length;
+   670→  document.getElementById('m1').textContent = c1;
+   671→  document.getElementById('m2').textContent = c2;
+   672→  document.getElementById('m3').textContent = c3;
+   673→
+   674→  // === Desglose detallado por tarjeta ===
+   675→  renderMetricDetail('m1-detail', '1)', c1);
+   676→  renderMetricDetail('m2-detail', '2)', c2);
+   677→  renderMetricDetail('m3-detail', '3)', c3);
+   678→
+   679→  const tbody = document.getElementById('tbody-results');
+   680→  if(results.length === 0){
+   681→    tbody.innerHTML = '<tr><td colspan="7" class="empty">No se encontraron incoherencias. 🎉</td></tr>';
+   682→  } else {
+   683→    tbody.innerHTML = results.map(r=>{
+   684→      const badgeClass = r['Tipo de Hallazgo'].startsWith('1)') ? 'h1' : r['Tipo de Hallazgo'].startsWith('3)') ? 'h3' : 'h2';
+   685→      return `<tr>
+   686→        <td>${esc(r['Nro. Orden'])}</td>
+   687→        <td>${esc(r['Equipo'])}</td>
+   688→        <td>${esc(r['Nombre Equipo'])}</td>
+   689→        <td>${esc(r['Tarea'])}</td>
+   690→        <td>${esc(r['Estado Tarea'])}</td>
+   691→        <td><span class="badge ${badgeClass}">${esc(r['Tipo de Hallazgo'])}</span></td>
+   692→        <td>${esc(r['Detalle'])}</td>
+   693→      </tr>`;
+   694→    }).join('');
+   695→  }
+   696→
+   697→  // poblar selector de órdenes para IA
+   698→  const sel = document.getElementById('orden-select');
+   699→  const uniqueOrders = [...new Set(results.map(r=>r['Nro. Orden']))];
+   700→  sel.innerHTML = uniqueOrders.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('');
+   701→}
+   702→
+   703→/* ============ Render: tareas sin categoría reconocida ============ */
+   704→function renderUnrecognized(){
+   705→  document.getElementById('panel-learning').style.display = 'block';
+   706→  document.getElementById('unrecognized-count').textContent =
+   707→    `${unrecognizedTasks.length} tarea(s) distinta(s) sin categoría reconocida`;
+   708→
+   709→  const tbody = document.getElementById('unrecognized-tbody');
+   710→  if(unrecognizedTasks.length === 0){
+   711→    tbody.innerHTML = '<tr><td colspan="3" class="empty">Todas las tareas de reemplazo detectadas coinciden con alguna categoría del diccionario. 🎉</td></tr>';
+   712→  } else {
+   713→    tbody.innerHTML = unrecognizedTasks.map(u => `<tr>
+   714→      <td>${esc(u.tarea)}</td><td>${u.count}</td><td>${esc(u.order)}</td>
+   715→    </tr>`).join('');
+   716→  }
+   717→}
+   718→
+   719→/* ============ Render: diccionario aprendido ============ */
+   720→function renderCustomDictList(){
+   721→  const box = document.getElementById('custom-dict-list');
+   722→  const keys = Object.keys(customDict);
+   723→  if(keys.length === 0){
+   724→    box.className = 'empty';
+   725→    box.innerHTML = 'Todavía no se aprendió ninguna categoría nueva.';
+   726→    return;
+   727→  }
+   728→  box.className = '';
+   729→  box.innerHTML = keys.map(k => `
+   730→    <span class="dict-chip">
+   731→      <strong>${esc(k)}</strong>
+   732→      <span class="syns">${esc(customDict[k].join(', '))}</span>
+   733→      <span class="del" data-cat="${esc(k)}" title="Quitar del diccionario">✕</span>
+   734→    </span>
+   735→  `).join('');
+   736→  box.querySelectorAll('.del').forEach(elDel=>{
+   737→    elDel.addEventListener('click', ()=>{
+   738→      delete customDict[elDel.dataset.cat];
+   739→      saveCustomDict(customDict);
+   740→      runAudit();
+   741→    });
+   742→  });
+   743→}
+   744→
+   745→function esc(v){
+   746→  if(v===null||v===undefined) return '';
+   747→  return String(v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+   748→}
+   749→
+   750→/* ============ Manejo de carga de archivos ============ */
+   751→async function handleFileInput(inputId, uploaderId, fnameId, onLoaded){
+   752→  const input = document.getElementById(inputId);
+   753→  input.addEventListener('change', async ()=>{
+   754→    const file = input.files[0];
+   755→    if(!file) return;
+   756→    document.getElementById(fnameId).textContent = file.name;
+   757→    document.getElementById(uploaderId).classList.add('filled');
+   758→    try{
+   759→      const rows = await parseTabularFile(file);
+   760→      onLoaded(rows);
+   761→    }catch(e){
+   762→      document.getElementById('load-status').innerHTML = `<div class="err">Error al leer "${file.name}": ${e.message}</div>`;
+   763→    }
+   764→  });
+   765→}
+   766→
+   767→handleFileInput('file-tar','up-tar','fname-tar', rows=>{ dfTar = rows; runAudit(); });
+   768→handleFileInput('file-mat','up-mat','fname-mat', rows=>{ dfMat = rows; runAudit(); });
+   769→handleFileInput('file-ov','up-ov','fname-ov', rows=>{ /* no usada en la lógica actual, se mantiene por compatibilidad */ });
+   770→
+   771→/* ============ Exportar a Excel formateado ============ */
+   772→document.getElementById('btn-download').addEventListener('click', async ()=>{
+   773→  const wb = new ExcelJS.Workbook();
+   774→  const ws = wb.addWorksheet('Auditoría');
+   775→
+   776→  const cols = ['Nro. Orden','Equipo','Nombre Equipo','Tarea','Estado Tarea','Tipo de Hallazgo','Detalle'];
+   777→  ws.addRow(cols);
+   778→  results.forEach(r=> ws.addRow(cols.map(c=>r[c])) );
+   779→
+   780→  // encabezados
+   781→  const headerRow = ws.getRow(1);
+   782→  headerRow.eachCell(cell=>{
+   783→    cell.font = {name:'Arial', size:11, bold:true, color:{argb:'FFFFFFFF'}};
+   784→    cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF1F497D'}};
+   785→    cell.alignment = {horizontal:'center', vertical:'middle'};
+   786→    cell.border = thinBorder();
+   787→  });
+   788→
+   789→  // filas de datos
+   790→  for(let i=0;i<results.length;i++){
+   791→    const rowIdx = i+2;
+   792→    const row = ws.getRow(rowIdx);
+   793→    const hallazgo = String(results[i]['Tipo de Hallazgo']);
+   794→    let fillColor = 'FFFCE4D6'; // naranja (tipo 2, default)
+   795→    if(hallazgo.startsWith('1)')) fillColor = 'FFFFF2CC'; // amarillo
+   796→    else if(hallazgo.startsWith('3)')) fillColor = 'FFE2EFDA'; // verde
+   797→
+   798→    const altFill = (rowIdx % 2 === 0) ? 'FFF9FAFB' : null;
+   799→
+   800→    row.eachCell((cell, colNumber)=>{
+   801→      cell.border = thinBorder();
+   802→      if(colNumber === 6){
+   803→        cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:fillColor}};
+   804→      } else if(altFill){
+   805→        cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:altFill}};
+   806→      }
+   807→      if([1,2,5].includes(colNumber)){
+   808→        cell.alignment = {horizontal:'center', vertical:'middle'};
+   809→      } else {
+   810→        cell.alignment = {horizontal:'left', vertical:'middle', wrapText:false};
+   811→      }
+   812→    });
+   813→  }
+   814→
+   815→  // autofiltro
+   816→  ws.autoFilter = { from: {row:1, column:1}, to: {row: results.length+1, column: cols.length} };
+   817→
+   818→  // autoajuste de columnas
+   819→  ws.columns.forEach(col=>{
+   820→    let maxLen = 10;
+   821→    col.eachCell({includeEmpty:true}, cell=>{
+   822→      const len = cell.value ? String(cell.value).length : 0;
+   823→      if(len > maxLen) maxLen = len;
+   824→    });
+   825→    col.width = Math.min(maxLen + 3, 80);
+   826→  });
+   827→
+   828→  const buf = await wb.xlsx.writeBuffer();
+   829→  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+   830→  const url = URL.createObjectURL(blob);
+   831→  const a = document.createElement('a');
+   832→  a.href = url; a.download = 'Auditoria_Mantenimiento_Generado.xlsx';
+   833→  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+   834→  URL.revokeObjectURL(url);
+   835→});
+   836→
+   837→function thinBorder(){
+   838→  const side = {style:'thin', color:{argb:'FFD9D9D9'}};
+   839→  return {top:side, bottom:side, left:side, right:side};
+   840→}
+   841→
+   842→/* ============ Análisis IA con Groq ============ */
+   843→document.getElementById('btn-analizar').addEventListener('click', async ()=>{
+   844→  const apiKey = document.getElementById('groq-key').value.trim();
+   845→  const model = document.getElementById('groq-model').value;
+   846→  const ordenSel = document.getElementById('orden-select').value;
+   847→  const resultBox = document.getElementById('ai-result');
+   848→
+   849→  if(!apiKey){
+   850→    resultBox.innerHTML = '<div class="warn">Introducí tu Groq API Key para habilitar el diagnóstico por Inteligencia Artificial.</div>';
+   851→    return;
+   852→  }
+   853→  const fila = results.find(r => String(r['Nro. Orden']) === String(ordenSel));
+   854→  if(!fila){
+   855→    resultBox.innerHTML = '<div class="err">No se encontró la orden seleccionada.</div>';
+   856→    return;
+   857→  }
+   858→
+   859→  const prompt = `Actúa como un Auditor Senior de Flotas de Transporte y Logística. Analizá la siguiente inconsistencia en una Orden de Trabajo:
+   860→- Nro Orden: ${fila['Nro. Orden']}
+   861→- Vehículo: ${fila['Nombre Equipo']} (${fila['Equipo']})
+   862→- Tarea del Mecánico: ${fila['Tarea']}
+   863→- Estado de la Tarea: ${fila['Estado Tarea']}
+   864→- Diagnóstico del Sistema: ${fila['Tipo de Hallazgo']}
+   865→- Datos del Pañol/Stock: ${fila['Detalle']}
+   866→
+   867→Escribí un análisis breve, directo al grano y profesional (en español de Argentina) explicando:
+   868→1. Qué error administrativo o humano ocurrió en el taller (Causa Raíz).
+   869→2. Qué riesgo representa para el stock general de pañol o para la seguridad física de la unidad.
+   870→3. Qué acción correctiva inmediata se le debe exigir al supervisor de taller.`;
+   871→
+   872→  resultBox.innerHTML = '<div class="ai-box loading">🤖 Groq IA analizando desvío de taller...</div>';
+   873→
+   874→  try{
+   875→    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+   876→      method: 'POST',
+   877→      headers: {
+   878→        'Content-Type': 'application/json',
+   879→        'Authorization': 'Bearer ' + apiKey
+   880→      },
+   881→      body: JSON.stringify({
+   882→        model: model,
+   883→        messages: [{role:'user', content: prompt}],
+   884→        temperature: 0.3
+   885→      })
+   886→    });
+   887→    const data = await resp.json();
+   888→    if(!resp.ok){
+   889→      const msg = (data && data.error && data.error.message) ? data.error.message : JSON.stringify(data);
+   890→      resultBox.innerHTML = `<div class="err">Error al conectar con Groq: ${esc(msg)}</div>`;
+   891→      return;
+   892→    }
+   893→    const text = data.choices[0].message.content;
+   894→    resultBox.innerHTML = `<div class="ai-box"><strong>🤖 Diagnóstico de la IA:</strong>\n\n${esc(text)}</div>`;
+   895→  }catch(e){
+   896→    resultBox.innerHTML = `<div class="err">Error al conectar con Groq: ${esc(e.message)}</div>`;
+   897→  }
+   898→});
+   899→
+   900→/* ============ Aprendizaje asistido por IA: sugerir categorías nuevas ============
+   901→   Este módulo no agrega nada automáticamente al diccionario: la IA propone
+   902→   categoría + sinónimos para cada tarea no reconocida, y un humano revisa,
+   903→   edita si hace falta, y decide qué guardar. Lo guardado queda en localStorage
+   904→   de este navegador y se puede exportar/importar como JSON para llevarlo a
+   905→   otras PCs (por ejemplo, copiándolo junto con la app en el pendrive).
+   906→============================================================================ */
+   907→const MAX_TASKS_PER_ANALYSIS = 10;
+   908→
+   909→document.getElementById('btn-analizar-dict').addEventListener('click', async ()=>{
+   910→  const apiKey = document.getElementById('groq-key').value.trim();
+   911→  const model = document.getElementById('groq-model').value;
+   912→  const box = document.getElementById('suggestions-box');
+   913→
+   914→  if(!apiKey){
+   915→    box.innerHTML = '<div class="warn">Introducí tu Groq API Key en el panel 3 para habilitar esta función.</div>';
+   916→    return;
+   917→  }
+   918→  if(unrecognizedTasks.length === 0){
+   919→    box.innerHTML = '<div class="empty">No hay tareas sin categoría reconocida para analizar.</div>';
+   920→    return;
+   921→  }
+   922→
+   923→  const fallbackEl = document.getElementById('MAX_TASKS_FALLBACK');
+   924→  const useFallback = fallbackEl && fallbackEl.value === 'true';
+   925→  if(fallbackEl) fallbackEl.value = 'false';
+   926→  const batchSize = useFallback ? Math.max(3, Math.floor(MAX_TASKS_PER_ANALYSIS / 2)) : MAX_TASKS_PER_ANALYSIS;
+   927→  const batch = unrecognizedTasks.slice(0, batchSize);
+   928→  const restantes = unrecognizedTasks.length - batch.length;
+   929→
+   930→  box.innerHTML = '<div class="ai-box loading">🧠 Groq IA analizando repuestos no reconocidos...</div>';
+   931→
+   932→  const listado = batch.map((u,i)=> `${i+1}. ${u.tarea}`).join('\n');
+   933→  const prompt = `Sos un experto en repuestos de mantenimiento de flotas de transporte pesado (camiones, acoplados).
+   934→Te paso una lista de tareas de taller que indican un cambio de repuesto, pero cuyo repuesto todavía no está
+   935→identificado en un diccionario de categorías.
+   936→
+   937→Para CADA tarea de la lista, identificá:
+   938→- "categoria": el nombre genérico del repuesto que se está cambiando, en UNA sola palabra o frase corta,
+   939→  en MAYÚSCULAS, sin tildes (ej: NEUMATICO, RODAMIENTO, BOMBA DE AGUA).
+   940→- "sinonimos": una lista de 2 a 5 palabras o frases en MAYÚSCULAS sin tildes que podrían aparecer en la
+   941→  descripción de ese mismo repuesto en un sistema de stock de pañol (sinónimos, variantes, nombres comerciales).
+   942→
+   943→Si dos tareas de la lista se refieren al mismo repuesto, usá la MISMA categoría para ambas.
+   944→Si una tarea no menciona ningún repuesto físico reconocible (por ejemplo, es una tarea administrativa o
+   945→ambigua), devolvé "categoria": null para esa tarea.
+   946→
+   947→Respondé ÚNICAMENTE con un array JSON válido, sin texto adicional, sin explicaciones, sin bloques de
+   948→markdown, con esta forma exacta:
+   949→[{"tarea": "...", "categoria": "...", "sinonimos": ["...", "..."]}, ...]
+   950→
+   951→Lista de tareas:
+   952→${listado}`;
+   953→
+   954→  try{
+   955→    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+   956→      method: 'POST',
+   957→      headers: {'Content-Type':'application/json', 'Authorization':'Bearer ' + apiKey},
+   958→      body: JSON.stringify({
+   959→        model: model,
+   960→        messages: [{role:'user', content: prompt}],
+   961→        temperature: 0.1,
+   962→        max_tokens: Math.min(8192, Math.max(2048, batchSize * 400))
+   963→      })
+   964→    });
+   965→    const data = await resp.json();
+   966→    if(!resp.ok){
+   967→      const errMsg = (data && data.error && data.error.message) ? data.error.message : JSON.stringify(data);
+   968→      if(errMsg.includes('TPM') || errMsg.includes('too large') || errMsg.includes('token')){
+   969→        box.innerHTML = `<div class="warn">⚠️ El pedido superó el límite de tokens de tu plan Groq. Se enviaron ${batch.length} tareas — <button class="btn-ghost" style="margin-top:6px;padding:6px 12px;font-size:12px;" onclick="document.getElementById('MAX_TASKS_FALLBACK').value='true';document.getElementById('btn-analizar-dict').click();">Reintentar con lote más chico (${Math.max(3,Math.floor(batch.length/2))} tareas)</button><input type="hidden" id="MAX_TASKS_FALLBACK" value="false">`;
+   970→      } else {
+   971→        box.innerHTML = `<div class="err">Error al conectar con Groq: ${esc(errMsg)}</div>`;
+   972→      }
+   973→      return;
+   974→    }
+   975→    let rawText = data.choices[0].message.content.trim();
+   976→    let text = rawText;
+   977→
+   978→    // === Limpieza robusta multi-capa para respuestas de LLM ===
+   979→
+   980→    // 1) Quitar bloques de razonamiento  ...  (Qwen3, DeepSeek, etc.)
+   981→    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+   982→
+   983→    // 2) Quitar TODAS las líneas de fence de markdown (```json, ```, etc.)
+   984→    text = text.replace(/```[a-zA-Z]*\s*/g, '').replace(/```/g, '').trim();
+   985→
+   986→    // 3) Extraer solo el array JSON: buscar el primer '[' y el último ']'
+   987→    const firstBracket = text.indexOf('[');
+   988→    const lastBracket = text.lastIndexOf(']');
+   989→    if (firstBracket !== -1 && lastBracket > firstBracket) {
+   990→      text = text.substring(firstBracket, lastBracket + 1);
+   991→    }
+   992→
+   993→    // 4) Reemplazar comillas tipográficas por comillas rectas (los LLM a veces las usan)
+   994→    text = text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+   995→
+   996→    // 5) Reparar errores comunes del LLM: comas sobrantes antes de } o ]
+   997→    text = text.replace(/,\s*([}\]])/g, '$1');
+   998→
+   999→    // 6) Si el JSON quedó truncado (max_tokens), intentar cerrarlo
+  1000→    //    Detectar si falta cerrar objetos o el array
+  1001→    const openBraces = (text.match(/\{/g) || []).length;
+  1002→    const closeBraces = (text.match(/\}/g) || []).length;
+  1003→    const openBrackets = (text.match(/\[/g) || []).length;
+  1004→    const closeBrackets = (text.match(/\]/g) || []).length;
+  1005→    if (closeBraces < openBraces || closeBrackets < openBrackets) {
+  1006→      // Quitar la última coma si la hay y cerrar lo que falte
+  1007→      text = text.replace(/,\s*$/, '');
+  1008→      const missingBraces = openBraces - closeBraces;
+  1009→      const missingBrackets = openBrackets - closeBrackets;
+  1010→      text += '}'.repeat(missingBraces) + ']'.repeat(missingBrackets);
+  1011→    }
+  1012→
+  1013→    let parsed;
+  1014→    try{ parsed = JSON.parse(text); }
+  1015→    catch(e){
+  1016→      box.innerHTML = `<div class="err">La IA no devolvió un JSON válido. Probá analizar de nuevo.
+  1017→        <br><br><strong style="font-size:12px;">Consejo:</strong> <span style="font-size:12px;">Si usás <em>qwen/qwen3.6-27b</em>, cambiá a <em>llama-3.3-70b-versatile</em> — los modelos de razonamiento a veces incluyen su "pensamiento" en la respuesta y eso rompe el JSON.</span>
+  1018→        <br><br><span style="font-family:var(--mono);font-size:11px;opacity:.6;">Respuesta cruda (primeros 600 chars):<br>${esc(rawText.slice(0,600))}</span>
+  1019→        <br><br><span style="font-family:var(--mono);font-size:11px;opacity:.4;">Después de la limpieza:<br>${esc(text.slice(0,600))}</span></div>`;
+  1020→      return;
+  1021→    }
+  1022→    if (!Array.isArray(parsed)) {
+  1023→      box.innerHTML = `<div class="err">La IA devolvió un JSON válido pero no es un array. Probá analizar de nuevo.<br><span style="font-family:var(--mono);font-size:11px;">${esc(text.slice(0,300))}</span></div>`;
+  1024→      return;
+  1025→    }
+  1026→    if (parsed.length === 0) {
+  1027→      box.innerHTML = `<div class="warn">La IA devolvió un array vacío. Puede que no haya reconocido repuestos válidos. Probá con otro modelo o revisá las tareas sin categoría.</div>`;
+  1028→      return;
+  1029→    }
+  1030→    const wasTruncated = (data.choices[0].finish_reason === 'length');
+  1031→    lastSuggestions = parsed.filter(s => s && s.categoria);
+  1032→    renderSuggestions();
+  1033→    if(wasTruncated){
+  1034→      document.getElementById('suggestions-box').insertAdjacentHTML('afterbegin',
+  1035→        `<div class="warn" style="margin-bottom:10px;">⚠️ La respuesta de la IA se cortó por límite de tokens. Se procesaron ${parsed.length} de ${batch.length} tareas. Guardá estas y volvé a analizar para obtener el resto.</div>`);
+  1036→    } else if(restantes > 0){
+  1037→      document.getElementById('suggestions-box').insertAdjacentHTML('beforeend',
+  1038→        `<div class="warn" style="margin-top:10px;">Se analizaron las primeras ${batch.length} tareas. Quedan ${restantes} más — guardá estas y volvé a analizar para revisar el resto.</div>`);
+  1039→    }
+  1040→  }catch(e){
+  1041→    box.innerHTML = `<div class="err">Error al conectar con Groq: ${esc(e.message)}</div>`;
+  1042→  }
+  1043→});
+  1044→
+  1045→function renderSuggestions(){
+  1046→  const box = document.getElementById('suggestions-box');
+  1047→  if(lastSuggestions.length === 0){
+  1048→    box.innerHTML = '<div class="empty">La IA no identificó repuestos reconocibles en las tareas analizadas.</div>';
+  1049→    return;
+  1050→  }
+  1051→  box.innerHTML = `
+  1052→    <div class="tag" style="margin-bottom:10px;">Sugerencias de la IA — revisá y ajustá antes de guardar</div>
+  1053→    ${lastSuggestions.map((s,i)=>`
+  1054→      <div class="sugg-card">
+  1055→        <div class="sugg-tarea">"${esc(s.tarea)}"</div>
+  1056→        <div class="sugg-row">
+  1057→          <input type="checkbox" id="sugg-check-${i}" checked>
+  1058→          <input type="text" id="sugg-cat-${i}" value="${esc(up(s.categoria))}" placeholder="CATEGORÍA">
+  1059→          <input type="text" id="sugg-syn-${i}" value="${esc((s.sinonimos||[]).map(x=>up(x)).join(', '))}" placeholder="Sinónimos separados por coma">
+  1060→        </div>
+  1061→      </div>
+  1062→    `).join('')}
+  1063→    <button class="btn-primary" id="btn-guardar-sugerencias" style="margin-top:6px;">💾 Guardar seleccionadas en el diccionario</button>
+  1064→  `;
+  1065→  document.getElementById('btn-guardar-sugerencias').addEventListener('click', ()=>{
+  1066→    lastSuggestions.forEach((s,i)=>{
+  1067→      const checkEl = document.getElementById(`sugg-check-${i}`);
+  1068→      if(!checkEl || !checkEl.checked) return;
+  1069→      const cat = up(document.getElementById(`sugg-cat-${i}`).value.trim());
+  1070→      const syns = document.getElementById(`sugg-syn-${i}`).value.split(',').map(x=>up(x.trim())).filter(Boolean);
+  1071→      if(!cat) return;
+  1072→      const existing = customDict[cat] || PARTS_TO_CHECK[cat] || [];
+  1073→      customDict[cat] = [...new Set([...existing, ...syns, cat])];
+  1074→    });
+  1075→    saveCustomDict(customDict);
+  1076→    document.getElementById('suggestions-box').innerHTML = '<div class="warn">Diccionario actualizado. Corriendo de nuevo la auditoría con las categorías nuevas...</div>';
+  1077→    lastSuggestions = [];
+  1078→    runAudit();
+  1079→  });
+  1080→}
+  1081→
+  1082→/* ============ Exportar / importar / vaciar diccionario aprendido ============ */
+  1083→document.getElementById('btn-dict-export').addEventListener('click', ()=>{
+  1084→  const blob = new Blob([JSON.stringify(customDict, null, 2)], {type:'application/json'});
+  1085→  const url = URL.createObjectURL(blob);
+  1086→  const a = document.createElement('a');
+  1087→  a.href = url; a.download = 'diccionario_repuestos_aprendido.json';
+  1088→  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  1089→  URL.revokeObjectURL(url);
+  1090→});
+  1091→
+  1092→document.getElementById('dict-import-input').addEventListener('change', async (e)=>{
+  1093→  const file = e.target.files[0];
+  1094→  if(!file) return;
+  1095→  try{
+  1096→    const text = await readFileAsText(file);
+  1097→    const imported = JSON.parse(text);
+  1098→    Object.keys(imported).forEach(cat=>{
+  1099→      const catUp = up(cat);
+  1100→      const existing = customDict[catUp] || [];
+  1101→      customDict[catUp] = [...new Set([...existing, ...(imported[cat]||[]).map(x=>up(x))])];
+  1102→    });
+  1103→    saveCustomDict(customDict);
+  1104→    runAudit();
+  1105→  }catch(err){
+  1106→    document.getElementById('suggestions-box').innerHTML = `<div class="err">No se pudo leer el archivo de diccionario: ${esc(err.message)}</div>`;
+  1107→  }
+  1108→  e.target.value = '';
+  1109→});
+  1110→
+  1111→document.getElementById('btn-dict-clear').addEventListener('click', ()=>{
+  1112→  if(!confirm('¿Vaciar todo el diccionario aprendido en este navegador? Podés exportarlo antes si querés conservarlo.')) return;
+  1113→  customDict = {};
+  1114→  saveCustomDict(customDict);
+  1115→  runAudit();
+  1116→});
+  1117→</script>
+  1118→</body>
+  1119→</html>
+  1120→
