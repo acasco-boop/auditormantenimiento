@@ -300,6 +300,85 @@ export default function AuditorApp() {
   const metrics = auditOutput?.metrics || { c1: 0, c2: 0, c3: 0, b1: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b3: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] } };
   const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
 
+  const analyzedTasksRef = useRef<Set<string>>(new Set());
+
+  // Reset analyzed tasks cache when new files are uploaded
+  useEffect(() => {
+    analyzedTasksRef.current.clear();
+  }, [tarFileName, matFileName, ordFileName]);
+
+  // Auto-analyze and save unrecognized tasks in the background when files are loaded
+  useEffect(() => {
+    if (unrecognizedTasks.length === 0 || !groqApiKey || aiDictLoading) return;
+
+    // Filter tasks that haven't been analyzed in this session
+    const tasksToAnalyze = unrecognizedTasks.filter(u => !analyzedTasksRef.current.has(up(u.tarea)));
+    if (tasksToAnalyze.length === 0) return;
+
+    const autoAnalyze = async () => {
+      setAiDictLoading(true);
+      
+      // Mark as analyzed immediately to prevent double submissions
+      tasksToAnalyze.forEach(u => analyzedTasksRef.current.add(up(u.tarea)));
+
+      // Process a batch of up to 15 tasks to avoid hitting payload or rate limits
+      const batch = tasksToAnalyze.slice(0, 15);
+      const listado = batch.map((u, i) => `${i + 1}. ${u.tarea}`).join('\n');
+      const prompt = `Sos un experto en repuestos de mantenimiento de flotas de transporte pesado (camiones, acoplados).
+Te paso una lista de tareas de taller que indican un cambio de repuesto, pero cuyo repuesto todavía no está identificado en un diccionario de categorías.
+Para CADA tarea de la lista, identificá:
+- "categoria": el nombre genérico del repuesto que se está cambiando, en UNA sola palabra o frase corta, en MAYÚSCULAS, sin tildes.
+- "sinonimos": una lista de 2 a 5 palabras o frases en MAYÚSCULAS sin tildes.
+Si dos tareas se refieren al mismo repuesto, usá la MISMA categoría. Si no menciona repuesto, devolvé "categoria": null.
+Respondé ÚNICAMENTE con un array JSON válido, sin texto adicional: [{"tarea":"...","categoria":"...","sinonimos":["...","..."]},...]
+Lista de tareas:\n${listado}`;
+
+      try {
+        const resp = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey: groqApiKey, model: groqModel })
+        });
+        const data = await resp.json();
+        if (!resp.ok) return;
+
+        let text = data.choices[0].message.content.trim();
+        text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim().replace(/```[a-zA-Z]*\s*/g, '').replace(/```/g, '').trim();
+        const fb = text.indexOf('['), lb = text.lastIndexOf(']');
+        if (fb !== -1 && lb > fb) text = text.substring(fb, lb + 1);
+        text = text.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/,\s*([}\]])/g, '$1');
+        const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length, bra = (text.match(/\[/g) || []).length, bra2 = (text.match(/\]/g) || []).length;
+        if (cb < ob || bra2 < bra) { text = text.replace(/,\s*$/, ''); text += '}'.repeat(ob - cb) + ']'.repeat(bra - bra2); }
+        let parsed: AISuggestion[];
+        try { parsed = JSON.parse(text); } catch { parsed = []; }
+
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const newDict = { ...customDict };
+          let added = false;
+          parsed.forEach(s => {
+            if (!s || !s.categoria) return;
+            const cat = up(s.categoria);
+            const syns = (s.sinonimos || []).map(x => up(x)).filter(Boolean);
+            if (!cat) return;
+            newDict[cat] = [...new Set([...(newDict[cat] || PARTS_TO_CHECK[cat] || []), ...syns, cat])];
+            added = true;
+          });
+
+          if (added) {
+            setCustomDict(newDict);
+            saveCustomDict(newDict);
+          }
+        }
+      } catch (e) {
+        console.error("Error auto-analyzing dictionary:", e);
+      } finally {
+        setAiDictLoading(false);
+      }
+    };
+
+    autoAnalyze();
+  }, [unrecognizedTasks, groqApiKey, groqModel, customDict]);
+
   const handleFile = useCallback((file: File, setDf: (rows: Record<string, unknown>[]) => void, setFileName: (n: string) => void) => {
     setFileName(file.name); setError(null);
     parseTabularFile(file).then(rows => setDf(rows)).catch(e => setError(`Error al leer "${file.name}": ${(e as Error).message}`));
