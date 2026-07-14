@@ -22,8 +22,42 @@ export function explicitReplacementNeeded(tareaUp: string): boolean {
   return actionKw.some(k => tareaUp.includes(k));
 }
 
+function levenshtein(a: string, b: string): number {
+  const tmp: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    tmp[i] = [i];
+  }
+  for (let j = 0; j <= b.length; j++) {
+    tmp[0][j] = j;
+  }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      tmp[i][j] = Math.min(
+        tmp[i - 1][j] + 1, // deletion
+        tmp[i][j - 1] + 1, // insertion
+        tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1) // substitution
+      );
+    }
+  }
+  return tmp[a.length][b.length];
+}
+
+export function isFuzzyMatch(word1: string, word2: string): boolean {
+  if (word1 === word2) return true;
+  const len1 = word1.length;
+  const len2 = word2.length;
+  if (Math.abs(len1 - len2) > 2) return false;
+  
+  const dist = levenshtein(word1, word2);
+  if (dist === 1) return true;
+  if (dist === 2 && Math.max(len1, len2) >= 6) return true;
+  return false;
+}
+
 export function getMatchingCategories(tareaUp: string, activeParts: Record<string, string[]>): string[] {
   const matches: string[] = [];
+  
+  // 1. Primero intentar coincidencias exactas (más rápido y seguro)
   for (const cat in activeParts) {
     const synonyms = activeParts[cat] || [];
     const matchesCat = tareaUp.includes(cat) || synonyms.some(syn => tareaUp.includes(up(syn)));
@@ -31,6 +65,29 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
       matches.push(cat);
     }
   }
+  
+  if (matches.length > 0) {
+    return matches;
+  }
+  
+  // 2. Si no hay coincidencias exactas, buscar coincidencias difusas por palabra
+  // Filtramos palabras de longitud >= 4 para evitar falsos positivos con conectores
+  const words = tareaUp.split(/[^A-Z0-9ÁÉÍÓÚÑ]/).map(w => w.trim()).filter(w => w.length >= 4);
+  for (const cat in activeParts) {
+    const synonyms = activeParts[cat] || [];
+    const matchesFuzzy = words.some(word => {
+      if (cat.length >= 4 && isFuzzyMatch(word, cat)) return true;
+      return synonyms.some(syn => {
+        const synUp = up(syn);
+        return synUp.length >= 4 && isFuzzyMatch(word, synUp);
+      });
+    });
+    
+    if (matchesFuzzy) {
+      matches.push(cat);
+    }
+  }
+  
   return matches;
 }
 
