@@ -17,7 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Upload, FileSpreadsheet, Download, Bot, Brain,
   AlertTriangle, XCircle, CheckCircle2, BarChart3,
-  Loader2, Search, Sparkles, ShoppingCart, ArrowLeftRight, Filter
+  Loader2, Search, Sparkles, ShoppingCart, ArrowLeftRight, Filter, Zap
 } from 'lucide-react';
 import type { OVRow, OVMatRow, OVFinding, AIMatchSuggestion } from '@/lib/ov-audit-engine';
 import { runOVAudit, buildFuzzyMatchPrompt } from '@/lib/ov-audit-engine';
@@ -61,6 +61,16 @@ export default function OVTab() {
   const [ovMatFileName, setOvMatFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // SAP Connection States
+  const [dataSource, setDataSource] = useState<'excel' | 'sap'>('excel');
+  const [sapUrl, setSapUrl] = useState('https://tuservidor:50000/b1s/v1');
+  const [sapCompany, setSapCompany] = useState('');
+  const [sapUser, setSapUser] = useState('');
+  const [sapPass, setSapPass] = useState('');
+  const [queryOV, setQueryOV] = useState('Q_ORDEN_VENTA');
+  const [queryOVMat, setQueryOVMat] = useState('Q_OV_MATERIALES');
+  const [sapLoading, setSapLoading] = useState(false);
+
   // Filter state
   const [filterOvta, setFilterOvta] = useState('');
   const [filterTipo, setFilterTipo] = useState('todos');
@@ -85,6 +95,36 @@ export default function OVTab() {
   }, []);
   const handleOVFile = useCallback((f: File) => handleFile(f, (rows) => setDfOV(rows as OVRow[]), setOvFileName), [handleFile]);
   const handleOVMatFile = useCallback((f: File) => handleFile(f, (rows) => setDfOVMat(rows as OVMatRow[]), setOvMatFileName), [handleFile]);
+
+  const handleSapSync = useCallback(async () => {
+    setSapLoading(true); setError(null);
+    try {
+      const loginRes = await fetch('/api/sap/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: sapUrl, companyDB: sapCompany, userName: sapUser, password: sapPass }) });
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) throw new Error(loginData.error || 'Login failed');
+      
+      const fetchQuery = async (qid: string) => {
+        const res = await fetch('/api/sap/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: sapUrl, sessionId: loginData.sessionId, queryId: qid }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Query ${qid} failed`);
+        return data.value;
+      };
+
+      const [ovData, ovMatData] = await Promise.all([
+        fetchQuery(queryOV),
+        fetchQuery(queryOVMat)
+      ]);
+
+      setDfOV(ovData as OVRow[]);
+      setDfOVMat(ovMatData as OVMatRow[]);
+      setOvFileName(`SAP Query: ${queryOV}`);
+      setOvMatFileName(`SAP Query: ${queryOVMat}`);
+    } catch (e: any) {
+      setError(`Error de SAP: ${e.message}`);
+    } finally {
+      setSapLoading(false);
+    }
+  }, [sapUrl, sapCompany, sapUser, sapPass, queryOV, queryOVMat]);
 
   // Filtered findings
   const filteredFindings = useMemo(() => {
@@ -164,68 +204,114 @@ export default function OVTab() {
 
       {/* Section 1: Upload */}
       <section className="animate-fade-in-up animate-fade-in-up-1">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="section-badge w-8 h-8 rounded-xl flex items-center justify-center text-cyan-400 text-sm font-bold font-mono shrink-0">1</div>
-          <div>
-            <h2 className="text-base font-semibold text-white">Cargar planillas OV & Materiales</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">Compará artículos y cantidades entre la Orden de Venta y el registro de Materiales</p>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="section-badge w-8 h-8 rounded-xl flex items-center justify-center text-cyan-400 text-sm font-bold font-mono shrink-0">1</div>
+            <div>
+              <h2 className="text-base font-semibold text-white">Obtener datos origen</h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">Importá por Excel o conectate a SAP Business One</p>
+            </div>
+          </div>
+          <div className="flex bg-slate-900/50 p-1 rounded-xl border border-white/[0.06]">
+            <button onClick={() => setDataSource('excel')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${dataSource === 'excel' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-500 hover:text-slate-300'}`}>Excel</button>
+            <button onClick={() => setDataSource('sap')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${dataSource === 'sap' ? 'bg-blue-500/20 text-blue-300' : 'text-slate-500 hover:text-slate-300'}`}>SAP B1</button>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div
-            className={`glass-card rounded-2xl cursor-pointer group animate-fade-in-up ${ovFileName ? 'gradient-border-cyan' : ''}`}
-            onClick={() => document.getElementById('ov-file-input')?.click()}
-          >
-            <input id="ov-file-input" type="file" accept=".xlsx,.csv" onChange={e => { const f = e.target.files?.[0]; if (f) handleOVFile(f); }} className="hidden" />
-            <div className="p-6 flex items-center gap-4">
-              <div className={`upload-icon p-3.5 rounded-2xl transition-all duration-300 ${ovFileName ? 'bg-gradient-to-br from-cyan-500/20 to-blue-500/10 text-cyan-400 shadow-lg shadow-cyan-500/10' : 'bg-slate-800/60 text-slate-500 group-hover:text-cyan-400 group-hover:bg-slate-800/80'}`}>
-                <ShoppingCart className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`font-semibold text-sm transition-colors ${ovFileName ? 'text-cyan-100' : 'text-slate-200 group-hover:text-white'}`}>Orden de Venta (Excel o CSV)</p>
-                <p className="text-xs text-slate-500 mt-1">Columna requerida: Nro Ovta, Número de artículo, Cantidad</p>
-                {ovFileName && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <p className="text-xs text-emerald-400/80 font-mono truncate">{ovFileName}</p>
+        
+        {dataSource === 'excel' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div
+              className={`glass-card rounded-2xl cursor-pointer group animate-fade-in-up ${ovFileName ? 'gradient-border-cyan' : ''}`}
+              onClick={() => document.getElementById('ov-file-input')?.click()}
+            >
+              <input id="ov-file-input" type="file" accept=".xlsx,.csv" onChange={e => { const f = e.target.files?.[0]; if (f) handleOVFile(f); }} className="hidden" />
+              <div className="p-6 flex items-center gap-4">
+                <div className={`upload-icon p-3.5 rounded-2xl transition-all duration-300 ${ovFileName ? 'bg-gradient-to-br from-cyan-500/20 to-blue-500/10 text-cyan-400 shadow-lg shadow-cyan-500/10' : 'bg-slate-800/60 text-slate-500 group-hover:text-cyan-400 group-hover:bg-slate-800/80'}`}>
+                  <ShoppingCart className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold text-sm transition-colors ${ovFileName ? 'text-cyan-100' : 'text-slate-200 group-hover:text-white'}`}>Orden de Venta (Excel o CSV)</p>
+                  <p className="text-xs text-slate-500 mt-1">Columna requerida: Nro Ovta, Número de artículo, Cantidad</p>
+                  {ovFileName && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <p className="text-xs text-emerald-400/80 font-mono truncate">{ovFileName}</p>
+                    </div>
+                  )}
+                </div>
+                {!ovFileName && (
+                  <div className="p-2 rounded-xl bg-slate-800/40 text-slate-600 group-hover:text-cyan-400/50 group-hover:bg-cyan-500/5 transition-all">
+                    <Upload className="w-4 h-4" />
                   </div>
                 )}
               </div>
-              {!ovFileName && (
-                <div className="p-2 rounded-xl bg-slate-800/40 text-slate-600 group-hover:text-cyan-400/50 group-hover:bg-cyan-500/5 transition-all">
-                  <Upload className="w-4 h-4" />
-                </div>
-              )}
             </div>
-          </div>
 
-          <div
-            className={`glass-card rounded-2xl cursor-pointer group animate-fade-in-up ${ovMatFileName ? 'gradient-border-cyan' : ''}`}
-            onClick={() => document.getElementById('ovmat-file-input')?.click()}
-          >
-            <input id="ovmat-file-input" type="file" accept=".xlsx,.csv" onChange={e => { const f = e.target.files?.[0]; if (f) handleOVMatFile(f); }} className="hidden" />
-            <div className="p-6 flex items-center gap-4">
-              <div className={`upload-icon p-3.5 rounded-2xl transition-all duration-300 ${ovMatFileName ? 'bg-gradient-to-br from-cyan-500/20 to-blue-500/10 text-cyan-400 shadow-lg shadow-cyan-500/10' : 'bg-slate-800/60 text-slate-500 group-hover:text-cyan-400 group-hover:bg-slate-800/80'}`}>
-                <FileSpreadsheet className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`font-semibold text-sm transition-colors ${ovMatFileName ? 'text-cyan-100' : 'text-slate-200 group-hover:text-white'}`}>Materiales (Excel o CSV)</p>
-                <p className="text-xs text-slate-500 mt-1">Columna requerida: Nro Ovta, Artículo, Salidas</p>
-                {ovMatFileName && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <p className="text-xs text-emerald-400/80 font-mono truncate">{ovMatFileName}</p>
+            <div
+              className={`glass-card rounded-2xl cursor-pointer group animate-fade-in-up ${ovMatFileName ? 'gradient-border-cyan' : ''}`}
+              onClick={() => document.getElementById('ovmat-file-input')?.click()}
+            >
+              <input id="ovmat-file-input" type="file" accept=".xlsx,.csv" onChange={e => { const f = e.target.files?.[0]; if (f) handleOVMatFile(f); }} className="hidden" />
+              <div className="p-6 flex items-center gap-4">
+                <div className={`upload-icon p-3.5 rounded-2xl transition-all duration-300 ${ovMatFileName ? 'bg-gradient-to-br from-cyan-500/20 to-blue-500/10 text-cyan-400 shadow-lg shadow-cyan-500/10' : 'bg-slate-800/60 text-slate-500 group-hover:text-cyan-400 group-hover:bg-slate-800/80'}`}>
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold text-sm transition-colors ${ovMatFileName ? 'text-cyan-100' : 'text-slate-200 group-hover:text-white'}`}>Materiales (Excel o CSV)</p>
+                  <p className="text-xs text-slate-500 mt-1">Columna requerida: Nro Ovta, Artículo, Salidas</p>
+                  {ovMatFileName && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <p className="text-xs text-emerald-400/80 font-mono truncate">{ovMatFileName}</p>
+                    </div>
+                  )}
+                </div>
+                {!ovMatFileName && (
+                  <div className="p-2 rounded-xl bg-slate-800/40 text-slate-600 group-hover:text-cyan-400/50 group-hover:bg-cyan-500/5 transition-all">
+                    <Upload className="w-4 h-4" />
                   </div>
                 )}
               </div>
-              {!ovMatFileName && (
-                <div className="p-2 rounded-xl bg-slate-800/40 text-slate-600 group-hover:text-cyan-400/50 group-hover:bg-cyan-500/5 transition-all">
-                  <Upload className="w-4 h-4" />
-                </div>
-              )}
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="glass-card rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-2 lg:col-span-2">
+              <Label className="text-xs text-slate-400">URL Service Layer</Label>
+              <Input value={sapUrl} onChange={e => setSapUrl(e.target.value)} placeholder="https://servidor:50000/b1s/v1" className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-400">Base de Datos (CompanyDB)</Label>
+              <Input value={sapCompany} onChange={e => setSapCompany(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-400">Usuario SAP</Label>
+              <Input value={sapUser} onChange={e => setSapUser(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+            </div>
+            <div className="space-y-2 lg:col-start-3">
+              <Label className="text-xs text-slate-400">Contraseña</Label>
+              <Input type="password" value={sapPass} onChange={e => setSapPass(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+            </div>
+            
+            <div className="lg:col-span-4 border-t border-white/[0.06] my-2 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-400">Query ID Órdenes de Venta</Label>
+                <Input value={queryOV} onChange={e => setQueryOV(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-cyan-400" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-400">Query ID Materiales de OV</Label>
+                <Input value={queryOVMat} onChange={e => setQueryOVMat(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-cyan-400" />
+              </div>
+            </div>
+            
+            <div className="lg:col-span-4 mt-2 flex justify-end">
+              <Button onClick={handleSapSync} disabled={sapLoading || !sapUrl || !sapCompany || !sapUser || !sapPass} className="btn-shimmer text-black font-semibold text-xs gap-2 h-9 rounded-xl px-6 bg-blue-500 hover:bg-blue-400">
+                {sapLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                Sincronizar SAP B1
+              </Button>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm flex items-center gap-3 backdrop-blur-sm">
             <div className="p-1.5 rounded-lg bg-red-500/20"><XCircle className="w-4 h-4" /></div>

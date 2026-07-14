@@ -241,6 +241,17 @@ export default function AuditorApp() {
   const [error, setError] = useState<string | null>(null);
   const [customDict, setCustomDict] = useState<Record<string, string[]>>(() => loadCustomDict());
   const [selectedOrder, setSelectedOrder] = useState('');
+  
+  // SAP Connection States
+  const [dataSource, setDataSource] = useState<'excel' | 'sap'>('excel');
+  const [sapUrl, setSapUrl] = useState('https://tuservidor:50000/b1s/v1');
+  const [sapCompany, setSapCompany] = useState('');
+  const [sapUser, setSapUser] = useState('');
+  const [sapPass, setSapPass] = useState('');
+  const [queryTar, setQueryTar] = useState('Q_TAREAS');
+  const [queryMat, setQueryMat] = useState('Q_MATERIALES');
+  const [queryOrd, setQueryOrd] = useState('Q_ORDENES');
+  const [sapLoading, setSapLoading] = useState(false);
   const [aiResult, setAiResult] = useState<{ type: 'loading' | 'result' | 'error' | 'warn'; text: string } | null>(null);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
   const [editedSuggestions, setEditedSuggestions] = useState<AISuggestion[]>([]);
@@ -265,6 +276,39 @@ export default function AuditorApp() {
   const handleTarFile = useCallback((f: File) => handleFile(f, (rows) => setDfTar(rows as TareaRow[]), setTarFileName), [handleFile]);
   const handleMatFile = useCallback((f: File) => handleFile(f, (rows) => setDfMat(rows as MaterialRow[]), setMatFileName), [handleFile]);
   const handleOrdFile = useCallback((f: File) => handleFile(f, (rows) => setDfOrd(rows as OrdenRow[]), setOrdFileName), [handleFile]);
+
+  const handleSapSync = useCallback(async () => {
+    setSapLoading(true); setError(null);
+    try {
+      const loginRes = await fetch('/api/sap/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: sapUrl, companyDB: sapCompany, userName: sapUser, password: sapPass }) });
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) throw new Error(loginData.error || 'Login failed');
+      
+      const fetchQuery = async (qid: string) => {
+        const res = await fetch('/api/sap/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: sapUrl, sessionId: loginData.sessionId, queryId: qid }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Query ${qid} failed`);
+        return data.value;
+      };
+
+      const [tarData, matData, ordData] = await Promise.all([
+        fetchQuery(queryTar),
+        fetchQuery(queryMat),
+        fetchQuery(queryOrd)
+      ]);
+
+      setDfTar(tarData as TareaRow[]);
+      setDfMat(matData as MaterialRow[]);
+      setDfOrd(ordData as OrdenRow[]);
+      setTarFileName(`SAP Query: ${queryTar}`);
+      setMatFileName(`SAP Query: ${queryMat}`);
+      setOrdFileName(`SAP Query: ${queryOrd}`);
+    } catch (e: any) {
+      setError(`Error de SAP: ${e.message}`);
+    } finally {
+      setSapLoading(false);
+    }
+  }, [sapUrl, sapCompany, sapUser, sapPass, queryTar, queryMat, queryOrd]);
 
   const handleExportExcel = useCallback(async () => {
     if (results.length === 0) return;
@@ -408,18 +452,68 @@ Lista de tareas:\n${listado}`;
 
         {/* Section 1: Upload */}
         <section className="animate-fade-in-up animate-fade-in-up-1">
-          <div className="flex items-center gap-3 mb-5">
-            <SectionNumber n={1} />
-            <div>
-              <h2 className="text-base font-semibold text-white">Cargar planillas de datos</h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">Subí los archivos Excel o CSV del período a auditar</p>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <SectionNumber n={1} />
+              <div>
+                <h2 className="text-base font-semibold text-white">Obtener datos origen</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">Importá por Excel o conectate a SAP Business One</p>
+              </div>
+            </div>
+            <div className="flex bg-slate-900/50 p-1 rounded-xl border border-white/[0.06]">
+              <button onClick={() => setDataSource('excel')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${dataSource === 'excel' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-500 hover:text-slate-300'}`}>Excel</button>
+              <button onClick={() => setDataSource('sap')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${dataSource === 'sap' ? 'bg-blue-500/20 text-blue-300' : 'text-slate-500 hover:text-slate-300'}`}>SAP B1</button>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FileUploader label="Tareas (Excel o CSV)" hint="Columna requerida: DocNum o Nro. Orden" accept=".xlsx,.csv" fileName={tarFileName} filled={!!tarFileName} onFile={handleTarFile} icon={<FileSpreadsheet className="w-6 h-6" />} />
-            <FileUploader label="Materiales (Excel o CSV)" hint="Columna requerida: Nro. OM o Nro. Orden" accept=".xlsx,.csv" fileName={matFileName} filled={!!matFileName} onFile={handleMatFile} icon={<Warehouse className="w-6 h-6" />} />
-            <FileUploader label="Órdenes (Excel o CSV) — Opcional" hint="Agrega Tipo de orden y Centros de costos por OM" accept=".xlsx,.csv" fileName={ordFileName} filled={!!ordFileName} onFile={handleOrdFile} icon={<ClipboardList className="w-6 h-6" />} />
-          </div>
+          
+          {dataSource === 'excel' ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <FileUploader label="Tareas (Excel o CSV)" hint="Columna requerida: DocNum o Nro. Orden" accept=".xlsx,.csv" fileName={tarFileName} filled={!!tarFileName} onFile={handleTarFile} icon={<FileSpreadsheet className="w-6 h-6" />} />
+              <FileUploader label="Materiales (Excel o CSV)" hint="Columna requerida: Nro. OM o Nro. Orden" accept=".xlsx,.csv" fileName={matFileName} filled={!!matFileName} onFile={handleMatFile} icon={<Warehouse className="w-6 h-6" />} />
+              <FileUploader label="Órdenes (Excel o CSV) — Opcional" hint="Agrega Tipo de orden y Centros de costos por OM" accept=".xlsx,.csv" fileName={ordFileName} filled={!!ordFileName} onFile={handleOrdFile} icon={<ClipboardList className="w-6 h-6" />} />
+            </div>
+          ) : (
+            <div className="glass-card rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-2 lg:col-span-2">
+                <Label className="text-xs text-slate-400">URL Service Layer</Label>
+                <Input value={sapUrl} onChange={e => setSapUrl(e.target.value)} placeholder="https://servidor:50000/b1s/v1" className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-400">Base de Datos (CompanyDB)</Label>
+                <Input value={sapCompany} onChange={e => setSapCompany(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-400">Usuario SAP</Label>
+                <Input value={sapUser} onChange={e => setSapUser(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+              </div>
+              <div className="space-y-2 lg:col-start-3">
+                <Label className="text-xs text-slate-400">Contraseña</Label>
+                <Input type="password" value={sapPass} onChange={e => setSapPass(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl" />
+              </div>
+              
+              <div className="lg:col-span-4 border-t border-white/[0.06] my-2 pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-400">Query ID Tareas</Label>
+                  <Input value={queryTar} onChange={e => setQueryTar(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-emerald-400" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-400">Query ID Materiales</Label>
+                  <Input value={queryMat} onChange={e => setQueryMat(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-emerald-400" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-400">Query ID Órdenes</Label>
+                  <Input value={queryOrd} onChange={e => setQueryOrd(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-emerald-400" />
+                </div>
+              </div>
+              
+              <div className="lg:col-span-4 mt-2 flex justify-end">
+                <Button onClick={handleSapSync} disabled={sapLoading || !sapUrl || !sapCompany || !sapUser || !sapPass} className="btn-shimmer text-black font-semibold text-xs gap-2 h-9 rounded-xl px-6 bg-blue-500 hover:bg-blue-400">
+                  {sapLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                  Sincronizar SAP B1
+                </Button>
+              </div>
+            </div>
+          )}
           {error && (
             <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm flex items-center gap-3 backdrop-blur-sm">
               <div className="p-1.5 rounded-lg bg-red-500/20"><XCircle className="w-4 h-4" /></div>
