@@ -32,9 +32,103 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
 
+function findMatchingCategoryToMerge(cat: string, syns: string[], activeParts: Record<string, string[]>): string | null {
+  const catUp = up(cat);
+  const wordsInCat = catUp.split(/[^A-Z]/).filter(w => w.length >= 4);
+
+  for (const existCat in activeParts) {
+    const existCatUp = up(existCat);
+    const existSyns = (activeParts[existCat] || []).map(s => up(s));
+    
+    for (const syn of [existCatUp, ...existSyns]) {
+      if (syn.length < 4) continue;
+      if (!syn.includes(' ')) {
+        if (wordsInCat.includes(syn)) {
+          return existCat;
+        }
+      } else {
+        if (catUp.includes(syn)) {
+          return existCat;
+        }
+      }
+    }
+
+    for (const s of syns) {
+      const sUp = up(s);
+      const wordsInS = sUp.split(/[^A-Z]/).filter(w => w.length >= 4);
+      for (const syn of [existCatUp, ...existSyns]) {
+        if (syn.length < 4) continue;
+        if (!syn.includes(' ')) {
+          if (wordsInS.includes(syn)) {
+            return existCat;
+          }
+        } else {
+          if (sUp.includes(syn)) {
+            return existCat;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function migrateAndMergeDict(dict: Record<string, string[]>, baseParts: Record<string, string[]>): Record<string, string[]> {
+  const merged = { ...dict };
+  const baseKeys = Object.keys(baseParts);
+  
+  const customKeys = Object.keys(merged);
+  customKeys.forEach(key => {
+    const keyUp = up(key);
+    let targetCat: string | null = null;
+    
+    for (const baseKey of baseKeys) {
+      if (baseKey === key) continue;
+      const baseKeyUp = up(baseKey);
+      const baseSyns = (baseParts[baseKey] || []).map(s => up(s));
+      const wordsInKey = keyUp.split(/[^A-Z]/).filter(w => w.length >= 4);
+      
+      for (const syn of [baseKeyUp, ...baseSyns]) {
+        if (syn.length < 4) continue;
+        if (!syn.includes(' ')) {
+          if (wordsInKey.includes(syn)) {
+            targetCat = baseKey;
+            break;
+          }
+        } else {
+          if (keyUp.includes(syn)) {
+            targetCat = baseKey;
+            break;
+          }
+        }
+      }
+      if (targetCat) break;
+    }
+    
+    if (targetCat) {
+      const synsToMerge = merged[key] || [];
+      merged[targetCat] = [...new Set([...(merged[targetCat] || baseParts[targetCat] || []), ...synsToMerge, key])];
+      delete merged[key];
+    }
+  });
+  
+  return merged;
+}
+
 function loadCustomDict(): Record<string, string[]> {
   if (typeof window === 'undefined') return {};
-  try { const r = localStorage.getItem(CUSTOM_DICT_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; }
+  try {
+    const r = localStorage.getItem(CUSTOM_DICT_KEY);
+    if (!r) return {};
+    const parsed = JSON.parse(r);
+    const migrated = migrateAndMergeDict(parsed, PARTS_TO_CHECK);
+    if (Object.keys(migrated).length !== Object.keys(parsed).length) {
+      localStorage.setItem(CUSTOM_DICT_KEY, JSON.stringify(migrated));
+    }
+    return migrated;
+  } catch {
+    return {};
+  }
 }
 function saveCustomDict(dict: Record<string, string[]>) {
   if (typeof window === 'undefined') return;
@@ -365,8 +459,9 @@ Lista de tareas:\n${listado}`;
           });
 
           if (added) {
-            setCustomDict(newDict);
-            saveCustomDict(newDict);
+            const migrated = migrateAndMergeDict(newDict, PARTS_TO_CHECK);
+            setCustomDict(migrated);
+            saveCustomDict(migrated);
           }
         }
       } catch (e) {
@@ -551,12 +646,13 @@ Lista de tareas:\n${listado}`;
     const newDict = { ...customDict };
     const toSave = editedSuggestions.length > 0 ? editedSuggestions : suggestions;
     toSave.forEach(s => { const cat = up(s.categoria); const syns = (s.sinonimos || []).map(x => up(x)).filter(Boolean); if (!cat) return; newDict[cat] = [...new Set([...(newDict[cat] || PARTS_TO_CHECK[cat] || []), ...syns, cat])]; });
-    setCustomDict(newDict); saveCustomDict(newDict); setSuggestions([]); setEditedSuggestions([]);
+    const migrated = migrateAndMergeDict(newDict, PARTS_TO_CHECK);
+    setCustomDict(migrated); saveCustomDict(migrated); setSuggestions([]); setEditedSuggestions([]);
   }, [editedSuggestions, suggestions, customDict]);
 
   const handleDeleteDictEntry = useCallback((cat: string) => { const d = { ...customDict }; delete d[cat]; setCustomDict(d); saveCustomDict(d); }, [customDict]);
   const handleExportDict = useCallback(() => { const b = new Blob([JSON.stringify(customDict, null, 2)], { type: 'application/json' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'diccionario_repuestos_aprendido.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u); }, [customDict]);
-  const handleImportDict = useCallback((e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (!f) return; f.text().then(t => { try { const imp = JSON.parse(t); const nd = { ...customDict }; Object.keys(imp).forEach(c => { const cu = up(c); nd[cu] = [...new Set([...(nd[cu] || []), ...(imp[c] || []).map((x: string) => up(x))])]; }); setCustomDict(nd); saveCustomDict(nd); } catch { /* */ } }); e.target.value = ''; }, [customDict]);
+  const handleImportDict = useCallback((e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (!f) return; f.text().then(t => { try { const imp = JSON.parse(t); const nd = { ...customDict }; Object.keys(imp).forEach(c => { const cu = up(c); nd[cu] = [...new Set([...(nd[cu] || []), ...(imp[c] || []).map((x: string) => up(x))])]; }); const migrated = migrateAndMergeDict(nd, PARTS_TO_CHECK); setCustomDict(migrated); saveCustomDict(migrated); } catch { /* */ } }); e.target.value = ''; }, [customDict]);
   const handleClearDict = useCallback(() => { if (!confirm('¿Vaciar todo el diccionario aprendido?')) return; setCustomDict({}); saveCustomDict({}); }, []);
 
   const hasResults = results.length > 0;
