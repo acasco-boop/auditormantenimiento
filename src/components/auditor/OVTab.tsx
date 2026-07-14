@@ -54,14 +54,7 @@ function ConfidenceBadge({ level }: { level: string }) {
 
 /* =================== MAIN OV TAB =================== */
 
-interface OVTabProps {
-  groqKey: string;
-  groqModel: string;
-  onGroqKeyChange: (key: string) => void;
-  onGroqModelChange: (model: string) => void;
-}
-
-export default function OVTab({ groqKey, groqModel, onGroqKeyChange, onGroqModelChange }: OVTabProps) {
+export default function OVTab() {
   const [dfOV, setDfOV] = useState<OVRow[] | null>(null);
   const [dfOVMat, setDfOVMat] = useState<OVMatRow[] | null>(null);
   const [ovFileName, setOvFileName] = useState<string | null>(null);
@@ -140,18 +133,15 @@ export default function OVTab({ groqKey, groqModel, onGroqKeyChange, onGroqModel
 
   // AI fuzzy match
   const handleAIMatch = useCallback(async () => {
-    if (!groqKey || findings.length === 0) {
-      if (!groqKey) setAiError('Introducí tu Groq API Key.');
-      return;
-    }
+    if (findings.length === 0) return;
     const prompt = buildFuzzyMatchPrompt(findings);
     if (!prompt) { setAiError('No hay hallazgos tipo 1 o 2 para analizar con IA.'); return; }
     setAiMatchLoading(true); setAiError(null);
     try {
-      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const resp = await fetch('/api/ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
-        body: JSON.stringify({ model: groqModel, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 4096 }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096 }),
       });
       const data = await resp.json();
       if (!resp.ok) { setAiError(data?.error?.message || 'Error de API'); setAiMatches([]); return; }
@@ -165,7 +155,7 @@ export default function OVTab({ groqKey, groqModel, onGroqKeyChange, onGroqModel
       setAiMatches(Array.isArray(parsed) ? parsed : []);
     } catch (e) { setAiError(String((e as Error).message)); setAiMatches([]); }
     finally { setAiMatchLoading(false); }
-  }, [groqKey, groqModel, findings]);
+  }, [findings]);
 
   const hasFindings = findings.length > 0;
 
@@ -412,27 +402,9 @@ export default function OVTab({ groqKey, groqModel, onGroqKeyChange, onGroqModel
           </div>
           <div className="glass-card rounded-2xl overflow-hidden">
             <div className="p-6 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-400 flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> API Key</Label>
-                  <Input type="password" placeholder="gsk_..." value={groqKey} onChange={e => onGroqKeyChange(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-sm h-10 rounded-xl focus:border-cyan-500/30" />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs text-slate-400">Modelo</Label>
-                  <Select value={groqModel} onValueChange={onGroqModelChange}>
-                    <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-sm h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-slate-800/95 backdrop-blur-xl border-white/[0.08]">
-                      <SelectItem value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</SelectItem>
-                      <SelectItem value="llama-3.1-8b-instant">llama-3.1-8b-instant</SelectItem>
-                      <SelectItem value="qwen/qwen3.6-27b">qwen/qwen3.6-27b</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               <Button
                 onClick={handleAIMatch}
-                disabled={!groqKey || findings.length === 0 || aiMatchLoading}
+                disabled={findings.length === 0 || aiMatchLoading}
                 className="btn-shimmer text-black font-semibold text-xs gap-2 h-10 rounded-xl px-6"
               >
                 {aiMatchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}

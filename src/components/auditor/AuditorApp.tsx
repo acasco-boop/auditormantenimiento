@@ -240,8 +240,6 @@ export default function AuditorApp() {
   const [ordFileName, setOrdFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [customDict, setCustomDict] = useState<Record<string, string[]>>(() => loadCustomDict());
-  const [groqKey, setGroqKey] = useState('');
-  const [groqModel, setGroqModel] = useState('llama-3.3-70b-versatile');
   const [selectedOrder, setSelectedOrder] = useState('');
   const [aiResult, setAiResult] = useState<{ type: 'loading' | 'result' | 'error' | 'warn'; text: string } | null>(null);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
@@ -292,7 +290,6 @@ export default function AuditorApp() {
   }, [results]);
 
   const handleAnalyzeIA = useCallback(async () => {
-    if (!groqKey) { setAiResult({ type: 'warn', text: 'Introducí tu Groq API Key para habilitar el diagnóstico por IA.' }); return; }
     const fila = results.find(r => String(r['Nro. Orden']) === selectedOrder);
     if (!fila) { setAiResult({ type: 'error', text: 'No se encontró la orden seleccionada.' }); return; }
     setAiResult({ type: 'loading', text: 'Analizando desvío de taller...' }); setAiAnalyzeLoading(true);
@@ -310,16 +307,16 @@ Escribí un análisis breve, directo al grano y profesional (en español de Arge
 2. Qué riesgo representa para el stock general de pañol o para la seguridad física de la unidad.
 3. Qué acción correctiva inmediata se le debe exigir al supervisor de taller.`;
     try {
-      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey }, body: JSON.stringify({ model: groqModel, messages: [{ role: 'user', content: prompt }], temperature: 0.3 }) });
+      const resp = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, temperature: 0.3 }) });
       const data = await resp.json();
-      if (!resp.ok) { const msg = data?.error?.message || JSON.stringify(data); setAiResult({ type: 'error', text: `Error: ${msg}` }); }
+      if (!resp.ok) { const msg = data?.error || JSON.stringify(data); setAiResult({ type: 'error', text: `Error: ${msg}` }); }
       else { setAiResult({ type: 'result', text: data.choices[0].message.content }); }
     } catch (e) { setAiResult({ type: 'error', text: `Error: ${(e as Error).message}` }); }
     finally { setAiAnalyzeLoading(false); }
-  }, [groqKey, groqModel, selectedOrder, results]);
+  }, [selectedOrder, results]);
 
   const handleAnalyzeDict = useCallback(async () => {
-    if (!groqKey || unrecognizedTasks.length === 0) return;
+    if (unrecognizedTasks.length === 0) return;
     setAiDictLoading(true);
     const batch = unrecognizedTasks.slice(0, 10);
     const listado = batch.map((u, i) => `${i + 1}. ${u.tarea}`).join('\n');
@@ -332,7 +329,7 @@ Si dos tareas se refieren al mismo repuesto, usá la MISMA categoría. Si no men
 Respondé ÚNICAMENTE con un array JSON válido, sin texto adicional: [{"tarea":"...","categoria":"...","sinonimos":["...","..."]},...]
 Lista de tareas:\n${listado}`;
     try {
-      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey }, body: JSON.stringify({ model: groqModel, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 4096 }) });
+      const resp = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096 }) });
       const data = await resp.json();
       if (!resp.ok) { setSuggestions([]); setAiDictLoading(false); return; }
       let text = data.choices[0].message.content.trim();
@@ -347,7 +344,7 @@ Lista de tareas:\n${listado}`;
       setSuggestions(Array.isArray(parsed) ? parsed.filter(s => s && s.categoria) : []);
     } catch { setSuggestions([]); }
     finally { setAiDictLoading(false); }
-  }, [groqKey, groqModel, unrecognizedTasks]);
+  }, [unrecognizedTasks]);
 
   const handleSaveSuggestions = useCallback(() => {
     const newDict = { ...customDict };
@@ -516,25 +513,7 @@ Lista de tareas:\n${listado}`;
             </div>
             <div className="glass-card rounded-2xl overflow-hidden">
               <div className="p-6 space-y-5">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-400 flex items-center gap-1.5"><Shield className="w-3 h-3" /> API Key</Label>
-                    <Input type="password" placeholder="gsk_..." value={groqKey} onChange={e => setGroqKey(e.target.value)} className="bg-white/[0.03] border-white/[0.06] font-mono text-sm h-10 rounded-xl focus:border-amber-500/30" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-400 flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Modelo</Label>
-                    <Select value={groqModel} onValueChange={setGroqModel}>
-                      <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-sm h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                      <SelectContent className="bg-slate-800/95 backdrop-blur-xl border-white/[0.08]">
-                        <SelectItem value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</SelectItem>
-                        <SelectItem value="llama-3.1-8b-instant">llama-3.1-8b-instant</SelectItem>
-                        <SelectItem value="qwen/qwen3.6-27b">qwen/qwen3.6-27b</SelectItem>
-                        <SelectItem value="openai/gpt-oss-120b">openai/gpt-oss-120b</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end mt-4">
                   <div className="space-y-2">
                     <Label className="text-xs text-slate-400">Orden a auditar</Label>
                     <Select value={selectedOrder} onValueChange={setSelectedOrder}>
@@ -544,7 +523,7 @@ Lista de tareas:\n${listado}`;
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={handleAnalyzeIA} disabled={!groqKey || !selectedOrder || aiAnalyzeLoading} className="btn-shimmer text-black font-semibold gap-2 h-10 rounded-xl px-6">
+                  <Button onClick={handleAnalyzeIA} disabled={!selectedOrder || aiAnalyzeLoading} className="btn-shimmer text-black font-semibold gap-2 h-10 rounded-xl px-6">
                     {aiAnalyzeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
                     Analizar
                   </Button>
@@ -596,7 +575,7 @@ Lista de tareas:\n${listado}`;
                       </Button>
                       <input type="file" accept=".json" onChange={handleImportDict} className="hidden" />
                     </label>
-                    <Button size="sm" onClick={handleAnalyzeDict} disabled={!groqKey || unrecognizedTasks.length === 0 || aiDictLoading} className="btn-shimmer text-black font-semibold text-xs gap-1.5 rounded-xl">
+                    <Button size="sm" onClick={handleAnalyzeDict} disabled={unrecognizedTasks.length === 0 || aiDictLoading} className="btn-shimmer text-black font-semibold text-xs gap-1.5 rounded-xl">
                       {aiDictLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
                       Analizar con IA
                     </Button>
@@ -673,12 +652,7 @@ Lista de tareas:\n${listado}`;
           </TabsContent>
 
           <TabsContent value="ov" className="mt-6">
-            <OVTab
-              groqKey={groqKey}
-              groqModel={groqModel}
-              onGroqKeyChange={setGroqKey}
-              onGroqModelChange={setGroqModel}
-            />
+            <OVTab />
           </TabsContent>
         </Tabs>
       </main>
