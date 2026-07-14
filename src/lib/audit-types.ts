@@ -57,6 +57,9 @@ export interface AuditResult {
   'Detalle': string;
   'Tipo de orden'?: string;
   'Centros de costos'?: string;
+  'Contabilizada'?: string;
+  'Fecha de la orden'?: string;
+  'Status de documento'?: string;
 }
 
 export interface UnrecognizedTask {

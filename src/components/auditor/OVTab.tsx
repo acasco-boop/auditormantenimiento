@@ -156,17 +156,48 @@ export default function OVTab({ groqApiKey = '', groqModel = '', onShowSettings 
   const handleExportExcel = useCallback(async () => {
     if (findings.length === 0) return;
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('OV vs Materiales');
-    const cols = ['Nro Ovta', 'Taller', 'Equipo', 'Artículo OV', 'Desc. OV', 'Cant. OV', 'Artículo Mat', 'Desc. Mat', 'Cant. Mat', 'Tipo de Hallazgo', 'Detalle'];
+    const cols = [
+      'Nro Ovta', 'Nro. OM', 'Taller', 'Equipo', 
+      'Artículo OV', 'Desc. OV', 'Cant. OV', 
+      'Artículo Mat', 'Desc. Mat', 'Cant. Mat', 
+      'Tipo de Hallazgo', 'Detalle'
+    ];
     ws.addRow(cols);
     findings.forEach(r => ws.addRow(cols.map(c => r[c as keyof OVFinding])));
     const headerRow = ws.getRow(1);
     headerRow.eachCell(cell => { cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } }; cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.border = thinBorder(); });
+    
+    const hallazgoColIdx = cols.indexOf('Tipo de Hallazgo') + 1;
+    const centerAlignCols = [
+      cols.indexOf('Nro Ovta') + 1,
+      cols.indexOf('Nro. OM') + 1,
+      cols.indexOf('Taller') + 1,
+      cols.indexOf('Equipo') + 1,
+      cols.indexOf('Artículo OV') + 1,
+      cols.indexOf('Artículo Mat') + 1,
+      cols.indexOf('Cant. OV') + 1,
+      cols.indexOf('Cant. Mat') + 1
+    ];
+
     for (let i = 0; i < findings.length; i++) {
       const rowIdx = i + 2; const row = ws.getRow(rowIdx);
       const hallazgo = String(findings[i]['Tipo de Hallazgo']);
       let fillColor = 'FFFCE4D6'; if (hallazgo.startsWith('1)')) fillColor = 'FFFFF2CC'; else if (hallazgo.startsWith('3)')) fillColor = 'FFE2EFDA';
       const altFill = rowIdx % 2 === 0 ? 'FFF9FAFB' : null;
-      row.eachCell((cell, colNumber) => { cell.border = thinBorder(); if (colNumber === 10) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } }; else if (altFill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: altFill } }; cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false }; });
+      
+      row.eachCell((cell, colNumber) => { 
+        cell.border = thinBorder(); 
+        if (colNumber === hallazgoColIdx) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } }; 
+        } else if (altFill) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: altFill } }; 
+        }
+        if (centerAlignCols.includes(colNumber)) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }; 
+        } else {
+          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false }; 
+        }
+      });
     }
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: findings.length + 1, column: cols.length } };
     ws.columns.forEach(col => { let maxLen = 10; col.eachCell({ includeEmpty: true }, cell => { const len = cell.value ? String(cell.value).length : 0; if (len > maxLen) maxLen = len; }); col.width = Math.min(maxLen + 3, 80); });
@@ -460,15 +491,23 @@ export default function OVTab({ groqApiKey = '', groqModel = '', onShowSettings 
               <Table>
                 <TableHeader>
                   <TableRow className="border-white/[0.04] hover:bg-transparent">
-                    {['Nro Ovta', 'Taller', 'Art. OV', 'Desc. OV', 'Cant OV', 'Art. Mat', 'Desc. Mat', 'Cant Mat', 'Tipo', 'Detalle'].map((h, i) => (
-                      <TableHead key={h} className={`bg-white/[0.02] text-slate-400 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap ${i === 1 ? 'hidden md:table-cell' : ''} ${i === 4 || i === 7 ? 'hidden lg:table-cell' : ''} ${i === 9 ? 'hidden xl:table-cell' : ''}`}>{h}</TableHead>
-                    ))}
+                    {['Nro Ovta', 'Nro. OM', 'Taller', 'Art. OV', 'Desc. OV', 'Cant OV', 'Art. Mat', 'Desc. Mat', 'Cant Mat', 'Tipo', 'Detalle'].map((h, i) => {
+                      let visibilityClass = "whitespace-nowrap";
+                      if (h === 'Taller') visibilityClass += " hidden md:table-cell";
+                      else if (h === 'Cant OV' || h === 'Cant Mat') visibilityClass += " hidden lg:table-cell";
+                      else if (h === 'Detalle') visibilityClass += " hidden xl:table-cell";
+                      else if (h === 'Nro. OM') visibilityClass += " hidden sm:table-cell";
+                      return (
+                        <TableHead key={h} className={`bg-white/[0.02] text-slate-400 text-[10px] uppercase tracking-widest font-semibold ${visibilityClass}`}>{h}</TableHead>
+                      );
+                    })}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredFindings.map((f, i) => (
                     <TableRow key={i} className="border-white/[0.03] table-row-glow">
                       <TableCell className="font-mono text-xs text-cyan-300/80">{esc(f['Nro Ovta'])}</TableCell>
+                      <TableCell className="font-mono text-xs text-amber-400/90 hidden sm:table-cell">{esc(f['Nro. OM']) || <span className="text-slate-600">—</span>}</TableCell>
                       <TableCell className="font-mono text-xs text-slate-500 hidden md:table-cell">{esc(f['Taller'])}</TableCell>
                       <TableCell className="font-mono text-xs text-amber-300/70">{esc(f['Artículo OV']) || <span className="text-slate-600">—</span>}</TableCell>
                       <TableCell className="text-xs text-slate-400 max-w-[180px] truncate" title={f['Desc. OV']}>{esc(f['Desc. OV']) || <span className="text-slate-600">—</span>}</TableCell>

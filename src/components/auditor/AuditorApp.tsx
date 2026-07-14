@@ -423,16 +423,45 @@ Lista de tareas:\n${listado}`;
   const handleExportExcel = useCallback(async () => {
     if (results.length === 0) return;
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Auditoría');
-    const cols = ['Nro. Orden', 'Tipo de orden', 'Centros de costos', 'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 'Tipo de Hallazgo', 'Detalle'];
+    const cols = [
+      'Nro. Orden', 'Tipo de orden', 'Centros de costos', 
+      'Contabilizada', 'Fecha de la orden', 'Status de documento', 
+      'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 
+      'Tipo de Hallazgo', 'Detalle'
+    ];
     ws.addRow(cols); results.forEach(r => ws.addRow(cols.map(c => r[c as keyof AuditResult])));
     const headerRow = ws.getRow(1);
     headerRow.eachCell(cell => { cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } }; cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.border = thinBorder(); });
+    
+    const tareaColIdx = cols.indexOf('Tarea') + 1;
+    const centerAlignCols = [
+      cols.indexOf('Nro. Orden') + 1,
+      cols.indexOf('Tipo de orden') + 1,
+      cols.indexOf('Contabilizada') + 1,
+      cols.indexOf('Fecha de la orden') + 1,
+      cols.indexOf('Status de documento') + 1,
+      cols.indexOf('Estado Tarea') + 1
+    ];
+
     for (let i = 0; i < results.length; i++) {
       const rowIdx = i + 2; const row = ws.getRow(rowIdx);
       const hallazgo = String(results[i]['Tipo de Hallazgo']);
       let fillColor = 'FFFCE4D6'; if (hallazgo.startsWith('1)')) fillColor = 'FFFFF2CC'; else if (hallazgo.startsWith('3)')) fillColor = 'FFE2EFDA';
       const altFill = rowIdx % 2 === 0 ? 'FFF9FAFB' : null;
-      row.eachCell((cell, colNumber) => { cell.border = thinBorder(); if (colNumber === 6) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } }; else if (altFill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: altFill } }; if ([1, 2, 5].includes(colNumber)) cell.alignment = { horizontal: 'center', vertical: 'middle' }; else cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false }; });
+      
+      row.eachCell((cell, colNumber) => { 
+        cell.border = thinBorder(); 
+        if (colNumber === tareaColIdx) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } }; 
+        } else if (altFill) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: altFill } }; 
+        }
+        if (centerAlignCols.includes(colNumber)) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }; 
+        } else {
+          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false }; 
+        }
+      });
     }
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: results.length + 1, column: cols.length } };
     ws.columns.forEach(col => { let maxLen = 10; col.eachCell({ includeEmpty: true }, cell => { const len = cell.value ? String(cell.value).length : 0; if (len > maxLen) maxLen = len; }); col.width = Math.min(maxLen + 3, 80); });
@@ -760,9 +789,18 @@ Lista de tareas:\n${listado}`;
                 <Table>
                   <TableHeader>
                     <TableRow className="border-white/[0.04] hover:bg-transparent">
-                      {['Nro. Orden', 'Tipo OM', 'C.Costos', 'Equipo', 'Tarea', 'Tipo', 'Detalle'].map((h, i) => (
-                        <TableHead key={h} className={`bg-white/[0.02] text-slate-400 text-[10px] uppercase tracking-widest font-semibold ${i === 1 ? 'hidden lg:table-cell' : ''} ${i === 3 ? 'hidden lg:table-cell' : ''} ${i === 6 ? 'hidden xl:table-cell' : ''}`}>{h}</TableHead>
-                      ))}
+                      {['Nro. Orden', 'Tipo OM', 'C.Costos', 'Contab.', 'Fecha Orden', 'Estado Doc', 'Equipo', 'Tarea', 'Tipo', 'Detalle'].map((h, i) => {
+                        let visibilityClass = "";
+                        if (h === 'Tipo OM') visibilityClass = "hidden lg:table-cell";
+                        else if (h === 'Contab.') visibilityClass = "hidden xl:table-cell";
+                        else if (h === 'Fecha Orden') visibilityClass = "hidden xl:table-cell";
+                        else if (h === 'Estado Doc') visibilityClass = "hidden xl:table-cell";
+                        else if (h === 'Equipo') visibilityClass = "hidden lg:table-cell";
+                        else if (h === 'Detalle') visibilityClass = "hidden xl:table-cell";
+                        return (
+                          <TableHead key={h} className={`bg-white/[0.02] text-slate-400 text-[10px] uppercase tracking-widest font-semibold ${visibilityClass}`}>{h}</TableHead>
+                        );
+                      })}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -775,6 +813,26 @@ Lista de tareas:\n${listado}`;
                           ) : <span className="text-slate-600 text-xs">—</span>}
                         </TableCell>
                         <TableCell className="font-mono text-xs text-teal-300/80">{esc(r['Centros de costos']) || <span className="text-slate-600">—</span>}</TableCell>
+                        
+                        {/* Contabilizada */}
+                        <TableCell className="text-xs hidden xl:table-cell">
+                          {r['Contabilizada'] ? (
+                            <Badge variant="outline" className={`text-[10px] font-mono ${String(r['Contabilizada']).toUpperCase() === 'SI' ? 'border-emerald-500/25 text-emerald-300 bg-emerald-500/[0.07]' : 'border-slate-500/25 text-slate-300 bg-slate-500/[0.07]'}`}>{esc(r['Contabilizada'])}</Badge>
+                          ) : <span className="text-slate-600 text-xs">—</span>}
+                        </TableCell>
+
+                        {/* Fecha de la orden */}
+                        <TableCell className="font-mono text-xs text-slate-300 hidden xl:table-cell">
+                          {esc(r['Fecha de la orden']) || <span className="text-slate-600">—</span>}
+                        </TableCell>
+
+                        {/* Status de documento */}
+                        <TableCell className="text-xs hidden xl:table-cell">
+                          {r['Status de documento'] ? (
+                            <Badge variant="outline" className="text-[10px] font-mono border-blue-500/25 text-blue-300 bg-blue-500/[0.07]">{esc(r['Status de documento'])}</Badge>
+                          ) : <span className="text-slate-600 text-xs">—</span>}
+                        </TableCell>
+
                         <TableCell className="font-mono text-xs text-slate-300 hidden lg:table-cell">{esc(r['Equipo'])}</TableCell>
                         <TableCell className="text-xs text-slate-300 max-w-[200px] truncate" title={r['Tarea']}>{esc(r['Tarea'])}</TableCell>
                         <TableCell><HallazgoBadge tipo={r['Tipo de Hallazgo']} /></TableCell>

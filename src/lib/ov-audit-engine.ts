@@ -40,6 +40,7 @@ export interface OVFinding {
   'Detalle': string;
   'Taller': string;
   'Equipo': string;
+  'Nro. OM'?: string | number | null;
 }
 
 export interface OVMetricBreakdown {
@@ -147,6 +148,7 @@ export function runOVAudit(
           'Detalle': `Artículo ${art} facturado en OV pero no encontrado en el registro de materiales`,
           'Taller': taller,
           'Equipo': equipo,
+          'Nro. OM': matRows[0]?.['Nro. OM'] || '',
         });
       }
     });
@@ -166,6 +168,7 @@ export function runOVAudit(
           'Detalle': `Artículo ${art} retirado de stock pero no está en la orden de venta`,
           'Taller': taller,
           'Equipo': equipo,
+          'Nro. OM': matData.row['Nro. OM'] || '',
         });
       }
     });
@@ -187,6 +190,7 @@ export function runOVAudit(
           'Detalle': `OV: ${ovData.cant} uds — Material: ${matData.cant} uds (diferencia: ${Math.abs(ovData.cant - matData.cant).toFixed(2)})`,
           'Taller': taller,
           'Equipo': equipo,
+          'Nro. OM': matData.row['Nro. OM'] || '',
         });
       }
     });

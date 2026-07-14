@@ -136,8 +136,14 @@ export function runAudit(
     matByOrder[key].push(r);
   });
 
-  // Órdenes indexadas por Nro. orden → { tipoOrden, centrosCostos }
-  const ordByOrder: Record<string, { tipoOrden: string; centrosCostos: string }> = {};
+  // Órdenes indexadas por Nro. orden → { tipoOrden, centrosCostos, contabilizada, fechaOrden, statusDoc }
+  const ordByOrder: Record<string, {
+    tipoOrden: string;
+    centrosCostos: string;
+    contabilizada: string;
+    fechaOrden: string;
+    statusDoc: string;
+  }> = {};
   if (dfOrd && dfOrd.length > 0) {
     dfOrd.forEach(r => {
       const key = String(r['Nro. orden'] ?? '');
@@ -146,6 +152,9 @@ export function runAudit(
         ordByOrder[key] = {
           tipoOrden: String(r['Tipo de orden'] || '').trim(),
           centrosCostos: String(r['Centos de costos'] || '').trim(),
+          contabilizada: String(r['Contabilizada'] || '').trim(),
+          fechaOrden: String(r['Fecha de la orden'] || '').trim(),
+          statusDoc: String(r['Status de documento'] || '').trim(),
         };
       }
     });
@@ -189,6 +198,9 @@ export function runAudit(
       ...(ordData ? {
         'Tipo de orden': ordData.tipoOrden || undefined,
         'Centros de costos': ordData.centrosCostos || undefined,
+        'Contabilizada': ordData.contabilizada || undefined,
+        'Fecha de la orden': ordData.fechaOrden || undefined,
+        'Status de documento': ordData.statusDoc || undefined,
       } : {}),
     };
 
