@@ -12,6 +12,31 @@ export function up(v: unknown): string {
   return stripAccents(String(v).toUpperCase());
 }
 
+export function formatDate(val: any): string {
+  if (val === null || val === undefined) return '';
+  if (val instanceof Date) {
+    const d = val.getDate().toString().padStart(2, '0');
+    const m = (val.getMonth() + 1).toString().padStart(2, '0');
+    const y = val.getFullYear();
+    return `${d}/${m}/${y}`;
+  }
+  const str = String(val).trim();
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+    return str;
+  }
+  if (str.includes('-') || str.includes('GMT') || str.includes('T')) {
+    const parsed = Date.parse(str);
+    if (!isNaN(parsed)) {
+      const dateObj = new Date(parsed);
+      const d = dateObj.getDate().toString().padStart(2, '0');
+      const m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+      const y = dateObj.getFullYear();
+      return `${d}/${m}/${y}`;
+    }
+  }
+  return str;
+}
+
 export function explicitReplacementNeeded(tareaUp: string): boolean {
   if (!tareaUp) return false;
   const controlKw = ['CONTROLAR','REVISION','REVISAR','CHEQUEAR','CONTROL'];
@@ -153,7 +178,7 @@ export function runAudit(
           tipoOrden: String(r['Tipo de orden'] || '').trim(),
           centrosCostos: String(r['Centos de costos'] || '').trim(),
           contabilizada: String(r['Contabilizada'] || '').trim(),
-          fechaOrden: String(r['Fecha de la orden'] || '').trim(),
+          fechaOrden: formatDate(r['Fecha de la orden']),
           statusDoc: String(r['Status de documento'] || '').trim(),
         };
       }
