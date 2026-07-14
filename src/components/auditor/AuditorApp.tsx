@@ -32,6 +32,21 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
 
+const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
+
+function cleanSynonyms(syns: string[]): string[] {
+  return (syns || [])
+    .map(x => up(x))
+    .filter(Boolean)
+    .filter(syn => {
+      const s = syn.trim();
+      if (s.includes(' ')) return true; // Las frases compuestas son válidas
+      if (s.length <= 2) return false;   // Descartar palabras cortas de 1 o 2 letras
+      if (stopWords.has(s)) return false; // Descartar stop-words de la lista
+      return true;
+    });
+}
+
 function findMatchingCategoryToMerge(cat: string, syns: string[], activeParts: Record<string, string[]>): string | null {
   const catUp = up(cat);
   const wordsInCat = catUp.split(/[^A-Z]/).filter(w => w.length >= 4);
@@ -74,8 +89,15 @@ function findMatchingCategoryToMerge(cat: string, syns: string[], activeParts: R
 }
 
 function migrateAndMergeDict(dict: Record<string, string[]>, baseParts: Record<string, string[]>): Record<string, string[]> {
-  const merged = { ...dict };
+  const merged: Record<string, string[]> = {};
   const baseKeys = Object.keys(baseParts);
+  
+  // Limpiar llaves y sinónimos primero (elimina "DE", "Y", etc. del diccionario cargado)
+  Object.keys(dict).forEach(key => {
+    const keyUp = up(key);
+    if (!keyUp) return;
+    merged[keyUp] = cleanSynonyms(dict[key]);
+  });
   
   const customKeys = Object.keys(merged);
   customKeys.forEach(key => {
@@ -122,9 +144,7 @@ function loadCustomDict(): Record<string, string[]> {
     if (!r) return {};
     const parsed = JSON.parse(r);
     const migrated = migrateAndMergeDict(parsed, PARTS_TO_CHECK);
-    if (Object.keys(migrated).length !== Object.keys(parsed).length) {
-      localStorage.setItem(CUSTOM_DICT_KEY, JSON.stringify(migrated));
-    }
+    localStorage.setItem(CUSTOM_DICT_KEY, JSON.stringify(migrated));
     return migrated;
   } catch {
     return {};
@@ -452,7 +472,7 @@ Lista de tareas:\n${listado}`;
           parsed.forEach(s => {
             if (!s || !s.categoria) return;
             const cat = up(s.categoria);
-            const syns = (s.sinonimos || []).map(x => up(x)).filter(Boolean);
+            const syns = cleanSynonyms(s.sinonimos);
             if (!cat) return;
             newDict[cat] = [...new Set([...(newDict[cat] || PARTS_TO_CHECK[cat] || []), ...syns, cat])];
             added = true;
@@ -645,7 +665,7 @@ Lista de tareas:\n${listado}`;
   const handleSaveSuggestions = useCallback(() => {
     const newDict = { ...customDict };
     const toSave = editedSuggestions.length > 0 ? editedSuggestions : suggestions;
-    toSave.forEach(s => { const cat = up(s.categoria); const syns = (s.sinonimos || []).map(x => up(x)).filter(Boolean); if (!cat) return; newDict[cat] = [...new Set([...(newDict[cat] || PARTS_TO_CHECK[cat] || []), ...syns, cat])]; });
+    toSave.forEach(s => { const cat = up(s.categoria); const syns = cleanSynonyms(s.sinonimos); if (!cat) return; newDict[cat] = [...new Set([...(newDict[cat] || PARTS_TO_CHECK[cat] || []), ...syns, cat])]; });
     const migrated = migrateAndMergeDict(newDict, PARTS_TO_CHECK);
     setCustomDict(migrated); saveCustomDict(migrated); setSuggestions([]); setEditedSuggestions([]);
   }, [editedSuggestions, suggestions, customDict]);

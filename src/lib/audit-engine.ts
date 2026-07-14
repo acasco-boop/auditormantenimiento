@@ -81,12 +81,53 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
 
 export function getMatchingCategories(tareaUp: string, activeParts: Record<string, string[]>): string[] {
   const matches: string[] = [];
+  const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
   
-  // 1. Primero intentar coincidencias exactas (más rápido y seguro)
+  const isValidSynonym = (syn: string) => {
+    const s = syn.trim();
+    if (!s) return false;
+    if (s.includes(' ')) return true; // Las frases compuestas como "BOMBA DE AGUA" siempre son válidas
+    if (s.length <= 2) return false;   // Descartar conectores de 1 o 2 letras (DE, Y, LA, EL)
+    if (stopWords.has(s)) return false; // Descartar stop-words comunes
+    return true;
+  };
+
+  // Separar la tarea en palabras limpias
+  const taskWords = tareaUp.split(/[^A-Z0-9ÁÉÍÓÚÑ]/).map(w => w.trim()).filter(Boolean);
+  
+  const isWordMatch = (taskWord: string, syn: string) => {
+    if (taskWord === syn) return true;
+    if (taskWord === syn + 'S') return true;  // Soporte para plural en español (ej. DISCO -> DISCOS)
+    if (taskWord === syn + 'ES') return true; // Soporte para plural en español (ej. RETEN -> RETENES)
+    return false;
+  };
+
+  // 1. Primero intentar coincidencias exactas (por palabra o por frase completa)
   for (const cat in activeParts) {
     const synonyms = activeParts[cat] || [];
-    const matchesCat = tareaUp.includes(cat) || synonyms.some(syn => tareaUp.includes(up(syn)));
-    if (matchesCat) {
+    
+    // Validar y comparar la categoría principal
+    let matchesCat = false;
+    if (isValidSynonym(cat)) {
+      if (cat.includes(' ')) {
+        matchesCat = tareaUp.includes(cat);
+      } else {
+        matchesCat = taskWords.some(w => isWordMatch(w, cat));
+      }
+    }
+    
+    // Validar y comparar los sinónimos
+    const matchesSyn = synonyms.some(syn => {
+      const synUp = up(syn);
+      if (!isValidSynonym(synUp)) return false;
+      if (synUp.includes(' ')) {
+        return tareaUp.includes(synUp);
+      } else {
+        return taskWords.some(w => isWordMatch(w, synUp));
+      }
+    });
+    
+    if (matchesCat || matchesSyn) {
       matches.push(cat);
     }
   }
@@ -96,15 +137,15 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
   }
   
   // 2. Si no hay coincidencias exactas, buscar coincidencias difusas por palabra
-  // Filtramos palabras de longitud >= 4 para evitar falsos positivos con conectores
-  const words = tareaUp.split(/[^A-Z0-9ÁÉÍÓÚÑ]/).map(w => w.trim()).filter(w => w.length >= 4);
+  // Filtramos palabras de longitud >= 4 y que no sean stop-words
+  const wordsForFuzzy = taskWords.filter(w => w.length >= 4 && !stopWords.has(w));
   for (const cat in activeParts) {
     const synonyms = activeParts[cat] || [];
-    const matchesFuzzy = words.some(word => {
-      if (cat.length >= 4 && isFuzzyMatch(word, cat)) return true;
+    const matchesFuzzy = wordsForFuzzy.some(word => {
+      if (cat.length >= 4 && !cat.includes(' ') && isFuzzyMatch(word, cat)) return true;
       return synonyms.some(syn => {
         const synUp = up(syn);
-        return synUp.length >= 4 && isFuzzyMatch(word, synUp);
+        return synUp.length >= 4 && !synUp.includes(' ') && isFuzzyMatch(word, synUp);
       });
     });
     
