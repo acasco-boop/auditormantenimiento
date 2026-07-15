@@ -373,35 +373,90 @@ export default function AuditorApp() {
   const [aiDictLoading, setAiDictLoading] = useState(false);
   const [aiAnalyzeLoading, setAiAnalyzeLoading] = useState(false);
 
-  // Groq Configuration States
+  // AI Configuration States
+  const [aiProvider, setAiProvider] = useState<'groq' | 'mimo' | 'lightning'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('ai_provider_v1') as any) || 'groq';
+    return 'groq';
+  });
+
   const [groqApiKey, setGroqApiKey] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('groq_api_key_v1') || '';
-    }
+    if (typeof window !== 'undefined') return localStorage.getItem('groq_api_key_v1') || '';
     return '';
   });
   const [groqModel, setGroqModel] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('groq_model_v1') || 'llama-3.3-70b-versatile';
-    }
+    if (typeof window !== 'undefined') return localStorage.getItem('groq_model_v1') || 'llama-3.3-70b-versatile';
     return 'llama-3.3-70b-versatile';
   });
+
+  const [mimoApiKey, setMimoApiKey] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('mimo_api_key_v1') || '';
+    return '';
+  });
+  const [mimoModel, setMimoModel] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('mimo_model_v1') || 'mimo-v2.5-pro';
+    return 'mimo-v2.5-pro';
+  });
+  const [mimoBaseUrl, setMimoBaseUrl] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('mimo_base_url_v1') || 'https://token-plan-sgp.xiaomimimo.com/v1';
+    return 'https://token-plan-sgp.xiaomimimo.com/v1';
+  });
+
+  const [lightningApiKey, setLightningApiKey] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('lightning_api_key_v1') || '';
+    return '';
+  });
+  const [lightningModel, setLightningModel] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('lightning_model_v1') || 'anthropic/claude-fable-5';
+    return 'anthropic/claude-fable-5';
+  });
+  const [lightningBaseUrl, setLightningBaseUrl] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('lightning_base_url_v1') || 'https://lightning.ai/api/v1';
+    return 'https://lightning.ai/api/v1';
+  });
+
   const [showSettings, setShowSettings] = useState(false);
   const [showKey, setShowKey] = useState(false);
 
+  const updateAiProvider = (prov: 'groq' | 'mimo' | 'lightning') => {
+    setAiProvider(prov);
+    if (typeof window !== 'undefined') localStorage.setItem('ai_provider_v1', prov);
+  };
   const updateGroqApiKey = (key: string) => {
     setGroqApiKey(key);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('groq_api_key_v1', key);
-    }
+    if (typeof window !== 'undefined') localStorage.setItem('groq_api_key_v1', key);
   };
-
   const updateGroqModel = (model: string) => {
     setGroqModel(model);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('groq_model_v1', model);
-    }
+    if (typeof window !== 'undefined') localStorage.setItem('groq_model_v1', model);
   };
+  const updateMimoApiKey = (key: string) => {
+    setMimoApiKey(key);
+    if (typeof window !== 'undefined') localStorage.setItem('mimo_api_key_v1', key);
+  };
+  const updateMimoModel = (model: string) => {
+    setMimoModel(model);
+    if (typeof window !== 'undefined') localStorage.setItem('mimo_model_v1', model);
+  };
+  const updateMimoBaseUrl = (url: string) => {
+    setMimoBaseUrl(url);
+    if (typeof window !== 'undefined') localStorage.setItem('mimo_base_url_v1', url);
+  };
+  const updateLightningApiKey = (key: string) => {
+    setLightningApiKey(key);
+    if (typeof window !== 'undefined') localStorage.setItem('lightning_api_key_v1', key);
+  };
+  const updateLightningModel = (model: string) => {
+    setLightningModel(model);
+    if (typeof window !== 'undefined') localStorage.setItem('lightning_model_v1', model);
+  };
+  const updateLightningBaseUrl = (url: string) => {
+    setLightningBaseUrl(url);
+    if (typeof window !== 'undefined') localStorage.setItem('lightning_base_url_v1', url);
+  };
+
+  const activeApiKey = aiProvider === 'groq' ? groqApiKey : aiProvider === 'mimo' ? mimoApiKey : lightningApiKey;
+  const activeModel = aiProvider === 'groq' ? groqModel : aiProvider === 'mimo' ? mimoModel : lightningModel;
+  const activeBaseUrl = aiProvider === 'mimo' ? mimoBaseUrl : aiProvider === 'lightning' ? lightningBaseUrl : '';
 
   const auditOutput = React.useMemo(() => {
     if (!dfTar || !dfMat) return null;
@@ -423,7 +478,7 @@ export default function AuditorApp() {
 
   // Auto-analyze and save unrecognized tasks in the background when files are loaded
   useEffect(() => {
-    if (unrecognizedTasks.length === 0 || !groqApiKey || aiDictLoading) return;
+    if (unrecognizedTasks.length === 0 || !activeApiKey || aiDictLoading) return;
 
     // Filter tasks that haven't been analyzed in this session
     const tasksToAnalyze = unrecognizedTasks.filter(u => !analyzedTasksRef.current.has(up(u.tarea)));
@@ -451,7 +506,7 @@ Lista de tareas:\n${listado}`;
         const resp = await fetch('/api/ai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey: groqApiKey, model: groqModel })
+          body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey: activeApiKey, model: activeModel, provider: aiProvider, baseUrl: activeBaseUrl })
         });
         const data = await resp.json();
         if (!resp.ok) return;
@@ -492,7 +547,7 @@ Lista de tareas:\n${listado}`;
     };
 
     autoAnalyze();
-  }, [unrecognizedTasks, groqApiKey, groqModel, customDict]);
+  }, [unrecognizedTasks, activeApiKey, activeModel, customDict, aiProvider, activeBaseUrl]);
 
   const handleFile = useCallback((file: File, setDf: (rows: Record<string, unknown>[]) => void, setFileName: (n: string) => void) => {
     setFileName(file.name); setError(null);
@@ -590,12 +645,12 @@ Lista de tareas:\n${listado}`;
   const handleAnalyzeIA = useCallback(async () => {
     const fila = results.find(r => String(r['Nro. Orden']) === selectedOrder);
     if (!fila) { setAiResult({ type: 'error', text: 'No se encontró la orden seleccionada.' }); return; }
-    if (!groqApiKey) {
-      setAiResult({ type: 'warn', text: 'Por favor, configurá tu API Key de Groq en la sección "Configurar Groq" al principio de la página.' });
+    if (!activeApiKey) {
+      setAiResult({ type: 'warn', text: 'Por favor, configurá tu API Key de IA en la sección "Configurar IA" al principio de la página.' });
       setShowSettings(true);
       return;
     }
-    setAiResult({ type: 'loading', text: 'Analizando desvío de taller con Groq...' }); setAiAnalyzeLoading(true);
+    setAiResult({ type: 'loading', text: 'Analizando desvío de taller con la IA...' }); setAiAnalyzeLoading(true);
     const prompt = `Actúa como un Auditor Senior de Flotas de Transporte y Logística. Analizá la siguiente inconsistencia en una Orden de Trabajo:
 - Nro Orden: ${fila['Nro. Orden']}
 - Tipo de Orden: ${fila['Tipo de orden'] || 'No disponible'}
@@ -613,19 +668,19 @@ Escribí un análisis breve, directo al grano y profesional (en español de Arge
       const resp = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, temperature: 0.3, apiKey: groqApiKey, model: groqModel })
+        body: JSON.stringify({ prompt, temperature: 0.3, apiKey: activeApiKey, model: activeModel, provider: aiProvider, baseUrl: activeBaseUrl })
       });
       const data = await resp.json();
       if (!resp.ok) { const msg = data?.error || JSON.stringify(data); setAiResult({ type: 'error', text: `Error: ${msg}` }); }
       else { setAiResult({ type: 'result', text: data.choices[0].message.content }); }
     } catch (e) { setAiResult({ type: 'error', text: `Error: ${(e as Error).message}` }); }
     finally { setAiAnalyzeLoading(false); }
-  }, [selectedOrder, results, groqApiKey, groqModel]);
+  }, [selectedOrder, results, activeApiKey, activeModel, aiProvider, activeBaseUrl]);
 
   const handleAnalyzeDict = useCallback(async () => {
     if (unrecognizedTasks.length === 0) return;
-    if (!groqApiKey) {
-      setError('Por favor, configurá tu API Key de Groq antes de usar la IA para el diccionario.');
+    if (!activeApiKey) {
+      setError('Por favor, configurá tu API Key de IA antes de usar la IA para el diccionario.');
       setShowSettings(true);
       return;
     }
@@ -644,7 +699,7 @@ Lista de tareas:\n${listado}`;
       const resp = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey: groqApiKey, model: groqModel })
+        body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey: activeApiKey, model: activeModel, provider: aiProvider, baseUrl: activeBaseUrl })
       });
       const data = await resp.json();
       if (!resp.ok) { setSuggestions([]); setAiDictLoading(false); return; }
@@ -660,7 +715,7 @@ Lista de tareas:\n${listado}`;
       setSuggestions(Array.isArray(parsed) ? parsed.filter(s => s && s.categoria) : []);
     } catch { setSuggestions([]); }
     finally { setAiDictLoading(false); }
-  }, [unrecognizedTasks, groqApiKey, groqModel]);
+  }, [unrecognizedTasks, activeApiKey, activeModel, aiProvider, activeBaseUrl]);
 
   const handleSaveSuggestions = useCallback(() => {
     const newDict = { ...customDict };
@@ -718,7 +773,7 @@ Lista de tareas:\n${listado}`;
             className="text-xs gap-1.5 border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05] rounded-xl px-4 py-2 h-auto"
           >
             <Settings className={`w-3.5 h-3.5 ${showSettings ? 'animate-spin' : ''} text-amber-400`} />
-            <span>Configurar Groq</span>
+            <span>Configurar IA</span>
           </Button>
         </div>
 
@@ -729,44 +784,156 @@ Lista de tareas:\n${listado}`;
                 <Settings className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-white">Configuración de Groq API</h3>
-                <p className="text-[11px] text-slate-500">Configurá tu API key y el modelo para realizar diagnósticos y sugerencias</p>
+                <h3 className="text-sm font-semibold text-white">Configuración de Inteligencia Artificial</h3>
+                <p className="text-[11px] text-slate-500">Configurá tu proveedor, API key y modelo para realizar diagnósticos y sugerencias</p>
               </div>
             </div>
+
+            {/* Provider Selection */}
+            <div className="mb-4 space-y-2 max-w-xs">
+              <Label className="text-xs text-slate-400">Proveedor de IA</Label>
+              <Select value={aiProvider} onValueChange={(val: any) => updateAiProvider(val)}>
+                <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100">
+                  <SelectValue placeholder="Seleccioná un proveedor de IA..." />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-950/95 backdrop-blur-2xl border-white/[0.08] text-slate-200">
+                  <SelectItem value="groq">Groq (Llama)</SelectItem>
+                  <SelectItem value="mimo">Xiaomi MiMo (Token Plan)</SelectItem>
+                  <SelectItem value="lightning">Lightning AI (Claude Fable)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Dynamic fields based on provider */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-400">Groq API Key</Label>
-                <div className="relative">
-                  <Input
-                    type={showKey ? 'text' : 'password'}
-                    value={groqApiKey}
-                    onChange={e => updateGroqApiKey(e.target.value)}
-                    placeholder="gsk_..."
-                    className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl pr-10 text-amber-100 placeholder:text-slate-700"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey(!showKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                  >
-                    {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-slate-400">Modelo Groq</Label>
-                <Select value={groqModel} onValueChange={updateGroqModel}>
-                  <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100">
-                    <SelectValue placeholder="Seleccioná un modelo..." />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-950/95 backdrop-blur-2xl border-white/[0.08] text-slate-200">
-                    <SelectItem value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (Recomendado)</SelectItem>
-                    <SelectItem value="llama-3.1-8b-instant">llama-3.1-8b-instant (Rápido)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {aiProvider === 'groq' && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Groq API Key</Label>
+                    <div className="relative">
+                      <Input
+                        type={showKey ? 'text' : 'password'}
+                        value={groqApiKey}
+                        onChange={e => updateGroqApiKey(e.target.value)}
+                        placeholder="gsk_..."
+                        className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl pr-10 text-amber-100 placeholder:text-slate-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Modelo Groq</Label>
+                    <Select value={groqModel} onValueChange={updateGroqModel}>
+                      <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100">
+                        <SelectValue placeholder="Seleccioná un modelo..." />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-950/95 backdrop-blur-2xl border-white/[0.08] text-slate-200">
+                        <SelectItem value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (Recomendado)</SelectItem>
+                        <SelectItem value="llama-3.1-8b-instant">llama-3.1-8b-instant (Rápido)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+
+              {aiProvider === 'mimo' && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Xiaomi MiMo API Key</Label>
+                    <div className="relative">
+                      <Input
+                        type={showKey ? 'text' : 'password'}
+                        value={mimoApiKey}
+                        onChange={e => updateMimoApiKey(e.target.value)}
+                        placeholder="tp-..."
+                        className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl pr-10 text-amber-100 placeholder:text-slate-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Modelo MiMo (Token Plan)</Label>
+                    <Select value={mimoModel} onValueChange={updateMimoModel}>
+                      <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100">
+                        <SelectValue placeholder="Seleccioná un modelo..." />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-950/95 backdrop-blur-2xl border-white/[0.08] text-slate-200">
+                        <SelectItem value="mimo-v2.5-pro">mimo-v2.5-pro (Flagship - Recomendado)</SelectItem>
+                        <SelectItem value="mimo-v2.5">mimo-v2.5</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="text-xs text-slate-400">Endpoint / Base URL (Token Plan)</Label>
+                    <Input
+                      value={mimoBaseUrl}
+                      onChange={e => updateMimoBaseUrl(e.target.value)}
+                      placeholder="https://token-plan-sgp.xiaomimimo.com/v1"
+                      className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-amber-100"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Podés cambiarlo si usás otro clúster de MiMo (por ejemplo: cn para China o ams para Europa).
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {aiProvider === 'lightning' && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Lightning API Key</Label>
+                    <div className="relative">
+                      <Input
+                        type={showKey ? 'text' : 'password'}
+                        value={lightningApiKey}
+                        onChange={e => updateLightningApiKey(e.target.value)}
+                        placeholder="Ingresá tu API Key de Lightning AI"
+                        className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl pr-10 text-amber-100 placeholder:text-slate-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Modelo Lightning</Label>
+                    <Input
+                      value={lightningModel}
+                      onChange={e => updateLightningModel(e.target.value)}
+                      placeholder="anthropic/claude-fable-5"
+                      className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="text-xs text-slate-400">Endpoint / Base URL (Lightning AI)</Label>
+                    <Input
+                      value={lightningBaseUrl}
+                      onChange={e => updateLightningBaseUrl(e.target.value)}
+                      placeholder="https://lightning.ai/api/v1"
+                      className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-amber-100"
+                    />
+                  </div>
+                </>
+              )}
             </div>
-            {groqApiKey && (
+
+            {activeApiKey && (
               <p className="text-[10px] text-emerald-400/80 mt-3 flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 animate-pulse" /> API Key guardada de forma segura en tu navegador.
               </p>
@@ -1113,7 +1280,7 @@ Lista de tareas:\n${listado}`;
           </TabsContent>
 
           <TabsContent value="ov" className="mt-6">
-            <OVTab groqApiKey={groqApiKey} groqModel={groqModel} onShowSettings={() => setShowSettings(true)} />
+            <OVTab apiKey={activeApiKey} model={activeModel} provider={aiProvider} baseUrl={activeBaseUrl} onShowSettings={() => setShowSettings(true)} />
           </TabsContent>
         </Tabs>
       </main>

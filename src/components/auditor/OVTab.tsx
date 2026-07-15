@@ -55,12 +55,14 @@ function ConfidenceBadge({ level }: { level: string }) {
 /* =================== MAIN OV TAB =================== */
 
 interface OVTabProps {
-  groqApiKey?: string;
-  groqModel?: string;
+  apiKey?: string;
+  model?: string;
+  provider?: string;
+  baseUrl?: string;
   onShowSettings?: () => void;
 }
 
-export default function OVTab({ groqApiKey = '', groqModel = '', onShowSettings }: OVTabProps) {
+export default function OVTab({ apiKey = '', model = '', provider = 'groq', baseUrl = '', onShowSettings }: OVTabProps) {
   const [dfOV, setDfOV] = useState<OVRow[] | null>(null);
   const [dfOVMat, setDfOVMat] = useState<OVMatRow[] | null>(null);
   const [ovFileName, setOvFileName] = useState<string | null>(null);
@@ -211,8 +213,8 @@ export default function OVTab({ groqApiKey = '', groqModel = '', onShowSettings 
   // AI fuzzy match
   const handleAIMatch = useCallback(async () => {
     if (findings.length === 0) return;
-    if (!groqApiKey) {
-      setAiError('Por favor, configurá tu API Key de Groq en la pestaña principal ("Configurar Groq").');
+    if (!apiKey) {
+      setAiError('Por favor, configurá tu API Key en la pestaña principal ("Configurar IA").');
       if (onShowSettings) onShowSettings();
       return;
     }
@@ -223,7 +225,7 @@ export default function OVTab({ groqApiKey = '', groqModel = '', onShowSettings 
       const resp = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey: groqApiKey, model: groqModel }),
+        body: JSON.stringify({ prompt, temperature: 0.1, max_tokens: 4096, apiKey, model, provider, baseUrl }),
       });
       const data = await resp.json();
       if (!resp.ok) { setAiError(data?.error || data?.error?.message || 'Error de API'); setAiMatches([]); return; }
@@ -237,7 +239,7 @@ export default function OVTab({ groqApiKey = '', groqModel = '', onShowSettings 
       setAiMatches(Array.isArray(parsed) ? parsed : []);
     } catch (e) { setAiError(String((e as Error).message)); setAiMatches([]); }
     finally { setAiMatchLoading(false); }
-  }, [findings, groqApiKey, groqModel, onShowSettings]);
+  }, [findings, apiKey, model, provider, baseUrl, onShowSettings]);
 
   const hasFindings = findings.length > 0;
 

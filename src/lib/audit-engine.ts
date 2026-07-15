@@ -43,8 +43,16 @@ export function explicitReplacementNeeded(tareaUp: string): boolean {
   if (controlKw.some(k => tareaUp.includes(k)) && tareaUp.includes('SELECTORA')) return false;
   const revKw = ['REVISION','REVISAR','CHEQUEAR'];
   if (revKw.some(k => tareaUp.includes(k))) return false;
-  const actionKw = ['CAMBIAR','REEMPLAZAR','COLOCAR','COLOCACION','INSTALAR','CAMBIO'];
-  return actionKw.some(k => tareaUp.includes(k));
+  
+  const actionKw = ['CAMBIAR', 'CAMBIO', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'REEMPLAZAR', 'COLOCA', 'COLCAR'];
+  
+  // Separar en palabras limpias
+  const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
+  
+  return words.some(word => {
+    if (actionKw.includes(word)) return true;
+    return actionKw.some(kw => isFuzzyMatch(word, kw));
+  });
 }
 
 function levenshtein(a: string, b: string): number {
