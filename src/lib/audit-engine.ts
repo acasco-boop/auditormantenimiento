@@ -90,19 +90,20 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
   
   const dist = levenshtein(word1, word2);
   if (dist === 1) return true;
-  if (dist === 2 && Math.max(len1, len2) >= 6) return true;
+  if (dist === 2 && Math.max(len1, len2) >= 5) return true; // Reducido a 5 para tolerar transposiciones en palabras cortas como REALY -> RELAY
   return false;
 }
 
 export function getMatchingCategories(tareaUp: string, activeParts: Record<string, string[]>): string[] {
   const matches: string[] = [];
   const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
+  const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'REEMPLAZAR', 'COLOCA', 'COLCAR']);
   
   const isValidSynonym = (syn: string) => {
     const s = syn.trim();
     if (!s) return false;
-    if (s.includes(' ')) return true; // Las frases compuestas como "BOMBA DE AGUA" siempre son válidas
-    if (s.length <= 2) return false;   // Descartar conectores de 1 o 2 letras (DE, Y, LA, EL)
+    if (s.includes(' ')) return true; // Las frases compuestas siempre son válidas
+    if (s.length <= 2) return false;   // Descartar conectores de 1 o 2 letras
     if (stopWords.has(s)) return false; // Descartar stop-words comunes
     return true;
   };
@@ -110,14 +111,39 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
   // Separar la tarea en palabras limpias
   const taskWords = tareaUp.split(/[^A-Z0-9ÁÉÍÓÚÑ]/).map(w => w.trim()).filter(Boolean);
   
+  // Palabras filtradas de la tarea para comparación
+  const taskWordsFiltered = taskWords.filter(w => !stopWords.has(w) && !actionWords.has(w));
+  
   const isWordMatch = (taskWord: string, syn: string) => {
     if (taskWord === syn) return true;
-    if (taskWord === syn + 'S') return true;  // Soporte para plural en español (ej. DISCO -> DISCOS)
-    if (taskWord === syn + 'ES') return true; // Soporte para plural en español (ej. RETEN -> RETENES)
+    if (taskWord === syn + 'S') return true;  // Soporte para plurales
+    if (taskWord === syn + 'ES') return true; // Soporte para plurales
     return false;
   };
 
-  // 1. Primero intentar coincidencias exactas (por palabra o por frase completa)
+  // Permite emparejar una frase (como "BASE SOPORTE AIRE ACONDICIONADO" o "CANO INTERCOOLER")
+  // palabra por palabra contra la tarea, ignorando stop-words/conectores y tolerando errores de ortografía.
+  const isPhraseMatch = (phrase: string) => {
+    const phraseWords = phrase.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && !stopWords.has(w) && !actionWords.has(w));
+    if (phraseWords.length === 0) return false;
+    
+    let taskIdx = 0;
+    for (const pWord of phraseWords) {
+      let found = false;
+      for (let i = taskIdx; i < taskWordsFiltered.length; i++) {
+        const tWord = taskWordsFiltered[i];
+        if (isWordMatch(tWord, pWord) || isFuzzyMatch(tWord, pWord)) {
+          found = true;
+          taskIdx = i + 1; // Preservar orden relativo de palabras
+          break;
+        }
+      }
+      if (!found) return false;
+    }
+    return true;
+  };
+
+  // 1. Primero intentar coincidencias por frase o palabra completa
   for (const cat in activeParts) {
     const synonyms = activeParts[cat] || [];
     
@@ -125,9 +151,9 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
     let matchesCat = false;
     if (isValidSynonym(cat)) {
       if (cat.includes(' ')) {
-        matchesCat = tareaUp.includes(cat);
+        matchesCat = isPhraseMatch(cat);
       } else {
-        matchesCat = taskWords.some(w => isWordMatch(w, cat));
+        matchesCat = taskWordsFiltered.some(w => isWordMatch(w, cat));
       }
     }
     
@@ -136,9 +162,9 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
       const synUp = up(syn);
       if (!isValidSynonym(synUp)) return false;
       if (synUp.includes(' ')) {
-        return tareaUp.includes(synUp);
+        return isPhraseMatch(synUp);
       } else {
-        return taskWords.some(w => isWordMatch(w, synUp));
+        return taskWordsFiltered.some(w => isWordMatch(w, synUp));
       }
     });
     
@@ -151,9 +177,8 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
     return matches;
   }
   
-  // 2. Si no hay coincidencias exactas, buscar coincidencias difusas por palabra
-  // Filtramos palabras de longitud >= 4 y que no sean stop-words
-  const wordsForFuzzy = taskWords.filter(w => w.length >= 4 && !stopWords.has(w));
+  // 2. Si no hay coincidencias exactas o de frase, buscar coincidencias difusas por palabra suelta
+  const wordsForFuzzy = taskWordsFiltered.filter(w => w.length >= 4);
   for (const cat in activeParts) {
     const synonyms = activeParts[cat] || [];
     const matchesFuzzy = wordsForFuzzy.some(word => {
