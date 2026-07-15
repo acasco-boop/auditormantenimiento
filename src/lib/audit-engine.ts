@@ -51,7 +51,14 @@ export function explicitReplacementNeeded(tareaUp: string): boolean {
   
   return words.some(word => {
     if (actionKw.includes(word)) return true;
-    return actionKw.some(kw => isFuzzyMatch(word, kw));
+    return actionKw.some(kw => {
+      // Para verbos de acción somos más estrictos (máxima distancia de 1)
+      // Esto evita que "SOLDAR" (6 letras) coincida con "COLCAR" (6 letras, distancia 2)
+      const len1 = word.length;
+      const len2 = kw.length;
+      if (Math.abs(len1 - len2) > 1) return false;
+      return levenshtein(word, kw) === 1;
+    });
   });
 }
 
