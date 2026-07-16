@@ -33,6 +33,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
 
 const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
+const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'CAMBIOS', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'INSTALACION', 'REEMPLAZAR', 'REEMPLAZO', 'COLOCA', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN', 'CAMBIANDO', 'COLOCANDO']);
 
 function cleanSynonyms(syns: string[]): string[] {
   return (syns || [])
@@ -43,6 +44,7 @@ function cleanSynonyms(syns: string[]): string[] {
       if (s.includes(' ')) return true; // Las frases compuestas son válidas
       if (s.length <= 2) return false;   // Descartar palabras cortas de 1 o 2 letras
       if (stopWords.has(s)) return false; // Descartar stop-words de la lista
+      if (actionWords.has(s)) return false; // Descartar verbos de cambio genéricos
       return true;
     });
 }
@@ -414,10 +416,19 @@ export default function AuditorApp() {
     return 'https://lightning.ai/api/v1';
   });
 
+  const [ollamaModel, setOllamaModel] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('ollama_model_v1') || 'gemma2';
+    return 'gemma2';
+  });
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('ollama_base_url_v1') || 'http://localhost:11434/v1';
+    return 'http://localhost:11434/v1';
+  });
+
   const [showSettings, setShowSettings] = useState(false);
   const [showKey, setShowKey] = useState(false);
 
-  const updateAiProvider = (prov: 'groq' | 'mimo' | 'lightning') => {
+  const updateAiProvider = (prov: 'groq' | 'mimo' | 'lightning' | 'ollama') => {
     setAiProvider(prov);
     if (typeof window !== 'undefined') localStorage.setItem('ai_provider_v1', prov);
   };
@@ -453,10 +464,18 @@ export default function AuditorApp() {
     setLightningBaseUrl(url);
     if (typeof window !== 'undefined') localStorage.setItem('lightning_base_url_v1', url);
   };
+  const updateOllamaModel = (model: string) => {
+    setOllamaModel(model);
+    if (typeof window !== 'undefined') localStorage.setItem('ollama_model_v1', model);
+  };
+  const updateOllamaBaseUrl = (url: string) => {
+    setOllamaBaseUrl(url);
+    if (typeof window !== 'undefined') localStorage.setItem('ollama_base_url_v1', url);
+  };
 
-  const activeApiKey = aiProvider === 'groq' ? groqApiKey : aiProvider === 'mimo' ? mimoApiKey : lightningApiKey;
-  const activeModel = aiProvider === 'groq' ? groqModel : aiProvider === 'mimo' ? mimoModel : lightningModel;
-  const activeBaseUrl = aiProvider === 'mimo' ? mimoBaseUrl : aiProvider === 'lightning' ? lightningBaseUrl : '';
+  const activeApiKey = aiProvider === 'groq' ? groqApiKey : aiProvider === 'mimo' ? mimoApiKey : aiProvider === 'lightning' ? lightningApiKey : 'ollama';
+  const activeModel = aiProvider === 'groq' ? groqModel : aiProvider === 'mimo' ? mimoModel : aiProvider === 'lightning' ? lightningModel : ollamaModel;
+  const activeBaseUrl = aiProvider === 'mimo' ? mimoBaseUrl : aiProvider === 'lightning' ? lightningBaseUrl : aiProvider === 'ollama' ? ollamaBaseUrl : '';
 
   const auditOutput = React.useMemo(() => {
     if (!dfTar || !dfMat) return null;
@@ -800,6 +819,7 @@ Lista de tareas:\n${listado}`;
                   <SelectItem value="groq">Groq (Llama)</SelectItem>
                   <SelectItem value="mimo">Xiaomi MiMo (Token Plan)</SelectItem>
                   <SelectItem value="lightning">Lightning AI (Claude Fable)</SelectItem>
+                  <SelectItem value="ollama">Ollama (Gemma Local)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -931,11 +951,42 @@ Lista de tareas:\n${listado}`;
                   </div>
                 </>
               )}
+
+              {aiProvider === 'ollama' && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-400">Modelo Ollama</Label>
+                    <Input
+                      value={ollamaModel}
+                      onChange={e => updateOllamaModel(e.target.value)}
+                      placeholder="gemma2"
+                      className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="text-xs text-slate-400">Endpoint / Base URL (Ollama)</Label>
+                    <Input
+                      value={ollamaBaseUrl}
+                      onChange={e => updateOllamaBaseUrl(e.target.value)}
+                      placeholder="http://localhost:11434/v1"
+                      className="bg-white/[0.03] border-white/[0.06] font-mono text-xs h-9 rounded-xl text-amber-100"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Dejalo como http://localhost:11434/v1 si lo tenés corriendo en tu propia PC.
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
 
-            {activeApiKey && (
+            {activeApiKey && aiProvider !== 'ollama' && (
               <p className="text-[10px] text-emerald-400/80 mt-3 flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 animate-pulse" /> API Key guardada de forma segura en tu navegador.
+              </p>
+            )}
+            {aiProvider === 'ollama' && (
+              <p className="text-[10px] text-emerald-400/80 mt-3 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 animate-pulse" /> Ollama no requiere clave de API. Conexión local activa.
               </p>
             )}
           </div>

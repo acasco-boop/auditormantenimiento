@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     const key = apiKey;
     const selectedModel = model;
 
-    if (!key) {
+    if (!key && selectedProvider !== 'ollama') {
       return NextResponse.json(
         { error: 'API Key no configurada. Por favor, ingrésela en la configuración de la app.' },
         { status: 400 }
@@ -24,16 +24,23 @@ export async function POST(req: Request) {
     } else if (selectedProvider === 'lightning') {
       const base = (baseUrl || 'https://lightning.ai/api/v1').replace(/\/$/, '');
       url = `${base}/chat/completions`;
+    } else if (selectedProvider === 'ollama') {
+      const base = (baseUrl || 'http://localhost:11434/v1').replace(/\/$/, '');
+      url = `${base}/chat/completions`;
     } else {
       return NextResponse.json({ error: `Proveedor no soportado: ${selectedProvider}` }, { status: 400 });
     }
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (key) {
+      headers['Authorization'] = `Bearer ${key}`;
+    }
+
     const resp = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-      },
+      headers,
       body: JSON.stringify({
         model: selectedModel,
         messages: [{ role: 'user', content: prompt }],

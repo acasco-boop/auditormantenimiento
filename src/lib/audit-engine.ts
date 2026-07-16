@@ -97,14 +97,15 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
 export function getMatchingCategories(tareaUp: string, activeParts: Record<string, string[]>): string[] {
   const matches: string[] = [];
   const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
-  const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'REEMPLAZAR', 'COLOCA', 'COLCAR']);
+  const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'CAMBIOS', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'INSTALACION', 'REEMPLAZAR', 'REEMPLAZO', 'COLOCA', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN', 'CAMBIANDO', 'COLOCANDO']);
   
   const isValidSynonym = (syn: string) => {
     const s = syn.trim();
     if (!s) return false;
-    if (s.includes(' ')) return true; // Las frases compuestas siempre son válidas
+    if (s.includes(' ')) return true; // Las frases compuestas siempre son válidas (ej. "CAJA DE CAMBIO" es una frase válida)
     if (s.length <= 2) return false;   // Descartar conectores de 1 o 2 letras
     if (stopWords.has(s)) return false; // Descartar stop-words comunes
+    if (actionWords.has(s)) return false; // Descartar verbos de cambio genéricos (evita que "CAMBIO" sea un sinónimo válido por sí solo)
     return true;
   };
 
