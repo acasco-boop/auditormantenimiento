@@ -1,6 +1,7 @@
 export const PARTS_TO_CHECK: Record<string, string[]> = {
   'LAMPARA': ['LAMPARA','FOCO','LED'],
   'FILTRO': ['FILTRO'],
+  'GRASA': ['GRASA','GRASERA'],
   'ACEITE': ['ACEITE','LUBRICANTE'],
   'CORREA': ['CORREA'],
   'PASTILLA': ['PASTILLA'],
@@ -38,3 +39,10 @@ export const PARTS_TO_CHECK: Record<string, string[]> = {
   'COMPRESOR': ['COMPRESOR'],
   'BOCINA': ['BOCINA','CLAXON'],
 };
+
+/**
+ * Categorías de PARTS_TO_CHECK que representan un material "de lubricación"
+ * (grasa, aceite, refrigerante). Se usan para validar que una tarea de tipo
+ * LUBRICACION (Engrase/Engrasar) tenga asociado un material coherente.
+ */
+export const LUBRICANT_CATEGORIES: string[] = ['GRASA', 'ACEITE', 'REFRIGERANTE'];

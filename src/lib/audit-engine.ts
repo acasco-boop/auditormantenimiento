@@ -1,5 +1,5 @@
 import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, MetricBreakdown } from './audit-types';
-import { PARTS_TO_CHECK } from './parts-dictionary';
+import { PARTS_TO_CHECK, LUBRICANT_CATEGORIES } from './parts-dictionary';
 
 export function stripAccents(str: string): string {
   return str
@@ -37,29 +37,78 @@ export function formatDate(val: any): string {
   return str;
 }
 
+// ---------------------------------------------------------------------------
+// Normalización de verbos/acciones de taller.
+//
+// El sistema necesita agrupar variantes de un mismo verbo de acción
+// (conjugaciones, sustantivaciones, errores de tipeo frecuentes) bajo una
+// única "categoría lógica de acción" ANTES de intentar el cruce con los
+// materiales. Esto es lo que permite que "Cambio" y "Cambiar" se traten
+// como la misma acción, que "Coloco" (antes NO coincidía con "Colocar" por
+// estar a distancia de edición 2, así que esas tareas se ignoraban por
+// completo) sea reconocido, y que "Agregar"/"Engrase" (que ni siquiera
+// estaban en la lista de verbos) disparen el cruce de materiales.
+// ---------------------------------------------------------------------------
+
+/** Categorías lógicas de acción reconocidas por el motor. */
+export type ActionType = 'REEMPLAZO' | 'COLOCACION' | 'AGREGADO' | 'LUBRICACION';
+
+/**
+ * Diccionario de variantes -> categoría lógica de acción.
+ * Cada entrada agrupa conjugaciones/derivaciones de un mismo verbo para que
+ * el resto del motor no tenga que lidiar con cada variante por separado.
+ */
+export const ACTION_SYNONYMS: Record<string, ActionType> = {
+  // Cambio / Cambiar
+  CAMBIO: 'REEMPLAZO', CAMBIOS: 'REEMPLAZO', CAMBIAR: 'REEMPLAZO', CAMBIA: 'REEMPLAZO',
+  CAMBIAN: 'REEMPLAZO', CAMBIANDO: 'REEMPLAZO', REEMPLAZO: 'REEMPLAZO', REEMPLAZOS: 'REEMPLAZO',
+  REEMPLAZAR: 'REEMPLAZO', REEMPLAZA: 'REEMPLAZO',
+  // Coloco / Colocar
+  COLOCO: 'COLOCACION', COLOCAR: 'COLOCACION', COLOCA: 'COLOCACION', COLOCAN: 'COLOCACION',
+  COLOCACION: 'COLOCACION', COLOCADO: 'COLOCACION', COLOCANDO: 'COLOCACION', COLCAR: 'COLOCACION',
+  INSTALAR: 'COLOCACION', INSTALACION: 'COLOCACION', INSTALA: 'COLOCACION',
+  // Agregar
+  AGREGAR: 'AGREGADO', AGREGO: 'AGREGADO', AGREGADO: 'AGREGADO', AGREGA: 'AGREGADO',
+  AGREGAN: 'AGREGADO', RELLENAR: 'AGREGADO', RELLENO: 'AGREGADO', RELLENA: 'AGREGADO',
+  // Engrase
+  ENGRASE: 'LUBRICACION', ENGRASAR: 'LUBRICACION', ENGRASO: 'LUBRICACION', ENGRASA: 'LUBRICACION',
+  ENGRASAN: 'LUBRICACION', ENGRASADO: 'LUBRICACION', LUBRICACION: 'LUBRICACION', LUBRICAR: 'LUBRICACION',
+};
+
+/** Devuelve la categoría lógica de acción de una palabra ya normalizada (MAYUS/sin tildes), o null. */
+export function normalizeActionWord(word: string): ActionType | null {
+  return ACTION_SYNONYMS[word] ?? null;
+}
+
+/**
+ * Recorre la tarea (en mayúsculas/sin tildes) y devuelve la primera
+ * categoría lógica de acción detectada, o null si no se reconoce ninguna.
+ */
+export function getActionType(tareaUp: string): ActionType | null {
+  if (!tareaUp) return null;
+  const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
+  for (const word of words) {
+    const direct = normalizeActionWord(word);
+    if (direct) return direct;
+    // Tolerancia a errores de tipeo leves (distancia de edición 1) contra cada variante conocida.
+    for (const variant in ACTION_SYNONYMS) {
+      if (Math.abs(word.length - variant.length) > 1) continue;
+      if (levenshtein(word, variant) === 1) return ACTION_SYNONYMS[variant];
+    }
+  }
+  return null;
+}
+
 export function explicitReplacementNeeded(tareaUp: string): boolean {
   if (!tareaUp) return false;
   const controlKw = ['CONTROLAR','REVISION','REVISAR','CHEQUEAR','CONTROL'];
   if (controlKw.some(k => tareaUp.includes(k)) && tareaUp.includes('SELECTORA')) return false;
   const revKw = ['REVISION','REVISAR','CHEQUEAR'];
   if (revKw.some(k => tareaUp.includes(k))) return false;
-  
-  const actionKw = ['CAMBIAR', 'CAMBIO', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'REEMPLAZAR', 'COLOCA', 'COLCAR'];
-  
-  // Separar en palabras limpias
-  const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
-  
-  return words.some(word => {
-    if (actionKw.includes(word)) return true;
-    return actionKw.some(kw => {
-      // Para verbos de acción somos más estrictos (máxima distancia de 1)
-      // Esto evita que "SOLDAR" (6 letras) coincida con "COLCAR" (6 letras, distancia 2)
-      const len1 = word.length;
-      const len2 = kw.length;
-      if (Math.abs(len1 - len2) > 1) return false;
-      return levenshtein(word, kw) === 1;
-    });
-  });
+
+  // Una tarea requiere cruce de materiales si contiene cualquier verbo de
+  // acción reconocido (Cambio/Cambiar, Coloco/Colocar, Agregar, Engrase, etc.)
+  return getActionType(tareaUp) !== null;
 }
 
 function levenshtein(a: string, b: string): number {
@@ -94,10 +143,18 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
   return false;
 }
 
+/**
+ * Set de verbos de acción a excluir cuando se buscan sinónimos de repuestos
+ * dentro de una tarea (para que, p.ej., la palabra "ENGRASE" no se confunda
+ * con el nombre de un repuesto). Se deriva de ACTION_SYNONYMS para mantener
+ * una única fuente de verdad con getActionType().
+ */
+export const ACTION_WORDS = new Set(Object.keys(ACTION_SYNONYMS));
+
 export function getMatchingCategories(tareaUp: string, activeParts: Record<string, string[]>): string[] {
   const matches: string[] = [];
   const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
-  const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'CAMBIOS', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'INSTALACION', 'REEMPLAZAR', 'REEMPLAZO', 'COLOCA', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN', 'CAMBIANDO', 'COLOCANDO']);
+  const actionWords = ACTION_WORDS;
   
   const isValidSynonym = (syn: string) => {
     const s = syn.trim();
@@ -328,9 +385,27 @@ export function runAudit(
         const found = matList.some(m => matsKws.some(mk => m.includes(up(mk))));
         if (!found) missingCategories.push(cat);
       }
-      if (missingCategories.length > 0) {
+
+      // Validación de coherencia Tarea (acción) <-> Material.
+      // Ej: una tarea de tipo LUBRICACION ("Engrase"/"Engrasar") debe tener
+      // asociado un material de tipo grasa/lubricante/refrigerante; si el
+      // material cargado es, en cambio, un repuesto físico (o viceversa),
+      // se considera una desconexión aunque la categoría por sí sola matchee.
+      const actionType = getActionType(tareaUp);
+      let actionMismatch = false;
+      if (actionType === 'LUBRICACION') {
+        const lubricantFound = matList.some(m =>
+          LUBRICANT_CATEGORIES.some(cat => (activeParts[cat] || []).some(kw => m.includes(up(kw))))
+        );
+        if (!lubricantFound) actionMismatch = true;
+      }
+
+      if (missingCategories.length > 0 || actionMismatch) {
+        const motivos: string[] = [];
+        if (missingCategories.length > 0) motivos.push(`Falta '${missingCategories.join("', '")}'`);
+        if (actionMismatch) motivos.push(`Acción de lubricación ('${tarea}') sin material de tipo grasa/lubricante`);
         results.push({ ...base,
-          'Tipo de Hallazgo': `2) Desconexión de material (Falta '${missingCategories.join("', '")}')`,
+          'Tipo de Hallazgo': `2) Desconexión de material (${motivos.join('; ')})`,
           'Detalle': 'Materiales cargados no coinciden: ' + mats.map(m => String(m['Desc. Artículo'] || '')).join(', '),
         });
       }

@@ -24,8 +24,9 @@ import {
   Settings, Eye, EyeOff
 } from 'lucide-react';
 import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
-import { runAudit, up } from '@/lib/audit-engine';
+import { runAudit, up, ACTION_WORDS } from '@/lib/audit-engine';
 import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
+import { requestOMCoherence, type CoherenceCheckResult } from '@/lib/ai-coherence';
 import { parseTabularFile, esc, thinBorder } from './shared-utils';
 import OVTab from './OVTab';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -33,7 +34,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 const CUSTOM_DICT_KEY = 'ommatcher_custom_dict_v1';
 
 const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
-const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'CAMBIOS', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'INSTALACION', 'REEMPLAZAR', 'REEMPLAZO', 'COLOCA', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN', 'CAMBIANDO', 'COLOCANDO']);
+// Se reutiliza el mismo diccionario de verbos de acción que usa el motor de
+// auditoría (audit-engine.ts) para que "Coloco", "Agregar", "Engrase", etc.
+// se filtren de manera consistente en toda la app.
+const actionWords = ACTION_WORDS;
 
 function cleanSynonyms(syns: string[]): string[] {
   return (syns || [])
@@ -375,6 +379,12 @@ export default function AuditorApp() {
   const [aiDictLoading, setAiDictLoading] = useState(false);
   const [aiAnalyzeLoading, setAiAnalyzeLoading] = useState(false);
 
+  // Control avanzado de IA: coherencia estructurada (JSON) Tarea <-> Material por OM.
+  // Se cachean los resultados por Nro. de Orden para no re-consultar la IA innecesariamente.
+  const [coherenceResults, setCoherenceResults] = useState<Record<string, CoherenceCheckResult>>({});
+  const [coherenceError, setCoherenceError] = useState<string | null>(null);
+  const [coherenceLoading, setCoherenceLoading] = useState(false);
+
   // AI Configuration States
   const [aiProvider, setAiProvider] = useState<'groq' | 'mimo' | 'lightning'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('ai_provider_v1') as any) || 'groq';
@@ -695,6 +705,43 @@ Escribí un análisis breve, directo al grano y profesional (en español de Arge
     } catch (e) { setAiResult({ type: 'error', text: `Error: ${(e as Error).message}` }); }
     finally { setAiAnalyzeLoading(false); }
   }, [selectedOrder, results, activeApiKey, activeModel, aiProvider, activeBaseUrl]);
+
+  // Control avanzado de IA (JSON estructurado): evalúa si las tareas y los
+  // materiales de la OM seleccionada son coherentes entre sí, devolviendo
+  // { coherente, discrepancia_detectada, sugerencia_control }.
+  const handleCoherenceCheck = useCallback(async () => {
+    if (!selectedOrder || !dfTar || !auditOutput) return;
+    if (!activeApiKey) {
+      setCoherenceError('Por favor, configurá tu API Key de IA en la sección "Configurar IA" al principio de la página.');
+      setShowSettings(true);
+      return;
+    }
+    setCoherenceError(null);
+    setCoherenceLoading(true);
+    try {
+      // Todas las tareas registradas para esta OM (no solo las que generaron un hallazgo).
+      const tareasOM = dfTar
+        .filter(t => String(t['Nro. Orden']) === selectedOrder)
+        .map(t => ({ tarea: String(t['Tarea'] || ''), estado: String(t['Estado'] || '') }))
+        .filter(t => t.tarea);
+      const materialesOM = auditOutput.matByOrder[selectedOrder] || [];
+
+      const result = await requestOMCoherence({
+        order: selectedOrder,
+        tareas: tareasOM,
+        materiales: materialesOM,
+        apiKey: activeApiKey,
+        model: activeModel,
+        provider: aiProvider,
+        baseUrl: activeBaseUrl,
+      });
+      setCoherenceResults(prev => ({ ...prev, [selectedOrder]: result }));
+    } catch (e) {
+      setCoherenceError((e as Error).message);
+    } finally {
+      setCoherenceLoading(false);
+    }
+  }, [selectedOrder, dfTar, auditOutput, activeApiKey, activeModel, aiProvider, activeBaseUrl]);
 
   const handleAnalyzeDict = useCallback(async () => {
     if (unrecognizedTasks.length === 0) return;
@@ -1202,10 +1249,17 @@ Lista de tareas:\n${listado}`;
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={handleAnalyzeIA} disabled={!selectedOrder || aiAnalyzeLoading} className="btn-shimmer text-black font-semibold gap-2 h-10 rounded-xl px-6">
-                    {aiAnalyzeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-                    Analizar
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={handleAnalyzeIA} disabled={!selectedOrder || aiAnalyzeLoading} className="btn-shimmer text-black font-semibold gap-2 h-10 rounded-xl px-6">
+                      {aiAnalyzeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+                      Analizar
+                    </Button>
+                    <Button onClick={handleCoherenceCheck} disabled={!selectedOrder || coherenceLoading} variant="outline"
+                      className="gap-2 h-10 rounded-xl px-6 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200">
+                      {coherenceLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                      Control de Coherencia IA
+                    </Button>
+                  </div>
                 </div>
                 {aiResult && (
                   <div className={`rounded-xl p-5 text-sm leading-relaxed backdrop-blur-sm ${
@@ -1219,6 +1273,41 @@ Lista de tareas:\n${listado}`;
                     {aiResult.type !== 'result' && aiResult.text}
                   </div>
                 )}
+
+                {/* Indicador visual del "Control Avanzado" de coherencia IA (JSON estructurado) para la OM seleccionada */}
+                {coherenceError && (
+                  <div className="rounded-xl p-4 text-sm bg-orange-500/[0.07] border border-orange-500/20 text-orange-300">
+                    {coherenceError}
+                  </div>
+                )}
+                {selectedOrder && coherenceResults[selectedOrder] && (() => {
+                  const cr = coherenceResults[selectedOrder];
+                  return (
+                    <div className={`rounded-xl p-5 text-sm leading-relaxed backdrop-blur-sm border ${
+                      cr.coherente
+                        ? 'bg-emerald-500/[0.07] border-emerald-500/25 text-emerald-200'
+                        : 'bg-red-500/[0.07] border-red-500/25 text-red-200'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        {cr.coherente
+                          ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          : <AlertTriangle className="w-4 h-4 text-red-400" />}
+                        <strong className={cr.coherente ? 'text-emerald-300' : 'text-red-300'}>
+                          OM {selectedOrder} · {cr.coherente ? 'Coherente' : 'Incoherente'}
+                        </strong>
+                        <Badge variant="outline" className="ml-auto text-[10px] font-mono border-white/10 text-slate-400">
+                          <Sparkles className="w-3 h-3 mr-1" /> IA
+                        </Badge>
+                      </div>
+                      {!cr.coherente && cr.discrepancia_detectada && (
+                        <p className="mt-1"><strong className="text-slate-300">Discrepancia detectada:</strong> {cr.discrepancia_detectada}</p>
+                      )}
+                      {cr.sugerencia_control && (
+                        <p className="mt-1"><strong className="text-slate-300">Sugerencia de control:</strong> {cr.sugerencia_control}</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </section>
