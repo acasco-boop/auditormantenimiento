@@ -360,7 +360,7 @@ export default function AuditorApp() {
   const [matFileName, setMatFileName] = useState<string | null>(null);
   const [ordFileName, setOrdFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [customDict, setCustomDict] = useState<Record<string, string[]>>(() => loadCustomDict());
+  const [customDict, setCustomDict] = useState<Record<string, string[]>>({});
   const [selectedOrder, setSelectedOrder] = useState('');
   
   // SAP Connection States
@@ -390,57 +390,61 @@ export default function AuditorApp() {
   const [closingTypeFilter, setClosingTypeFilter] = useState<'ALL' | 'WITH_MAT' | 'WITHOUT_MAT'>('ALL');
 
   // AI Configuration States
-  const [aiProvider, setAiProvider] = useState<'groq' | 'mimo' | 'lightning'>(() => {
-    if (typeof window !== 'undefined') return (localStorage.getItem('ai_provider_v1') as any) || 'groq';
-    return 'groq';
-  });
-
-  const [groqApiKey, setGroqApiKey] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('groq_api_key_v1') || '';
-    return '';
-  });
-  const [groqModel, setGroqModel] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('groq_model_v1') || 'llama-3.3-70b-versatile';
-    return 'llama-3.3-70b-versatile';
-  });
-
-  const [mimoApiKey, setMimoApiKey] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('mimo_api_key_v1') || '';
-    return '';
-  });
-  const [mimoModel, setMimoModel] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('mimo_model_v1') || 'mimo-v2.5-pro';
-    return 'mimo-v2.5-pro';
-  });
-  const [mimoBaseUrl, setMimoBaseUrl] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('mimo_base_url_v1') || 'https://token-plan-sgp.xiaomimimo.com/v1';
-    return 'https://token-plan-sgp.xiaomimimo.com/v1';
-  });
-
-  const [lightningApiKey, setLightningApiKey] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('lightning_api_key_v1') || '';
-    return '';
-  });
-  const [lightningModel, setLightningModel] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('lightning_model_v1') || 'anthropic/claude-fable-5';
-    return 'anthropic/claude-fable-5';
-  });
-  const [lightningBaseUrl, setLightningBaseUrl] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('lightning_base_url_v1') || 'https://lightning.ai/api/v1';
-    return 'https://lightning.ai/api/v1';
-  });
-
-  const [ollamaModel, setOllamaModel] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('ollama_model_v1') || 'gemma2';
-    return 'gemma2';
-  });
-  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('ollama_base_url_v1') || 'http://localhost:11434/v1';
-    return 'http://localhost:11434/v1';
-  });
+  const [aiProvider, setAiProvider] = useState<'groq' | 'mimo' | 'lightning' | 'ollama'>('groq');
+  const [groqApiKey, setGroqApiKey] = useState('');
+  const [groqModel, setGroqModel] = useState('llama-3.3-70b-versatile');
+  const [mimoApiKey, setMimoApiKey] = useState('');
+  const [mimoModel, setMimoModel] = useState('mimo-v2.5-pro');
+  const [mimoBaseUrl, setMimoBaseUrl] = useState('https://token-plan-sgp.xiaomimimo.com/v1');
+  const [lightningApiKey, setLightningApiKey] = useState('');
+  const [lightningModel, setLightningModel] = useState('anthropic/claude-fable-5');
+  const [lightningBaseUrl, setLightningBaseUrl] = useState('https://lightning.ai/api/v1');
+  const [ollamaModel, setOllamaModel] = useState('gemma2');
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('http://localhost:11434/v1');
 
   const [showSettings, setShowSettings] = useState(false);
   const [showKey, setShowKey] = useState(false);
+
+  // Carga asíncrona de configuraciones en el cliente para evitar mismatch de hidratación SSR
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const provider = localStorage.getItem('ai_provider_v1');
+    if (provider) setAiProvider(provider as any);
+
+    const groqKey = localStorage.getItem('groq_api_key_v1');
+    if (groqKey) setGroqApiKey(groqKey);
+
+    const gModel = localStorage.getItem('groq_model_v1');
+    if (gModel) setGroqModel(gModel);
+
+    const mApiKey = localStorage.getItem('mimo_api_key_v1');
+    if (mApiKey) setMimoApiKey(mApiKey);
+
+    const mModel = localStorage.getItem('mimo_model_v1');
+    if (mModel) setMimoModel(mModel);
+
+    const mUrl = localStorage.getItem('mimo_base_url_v1');
+    if (mUrl) setMimoBaseUrl(mUrl);
+
+    const lApiKey = localStorage.getItem('lightning_api_key_v1');
+    if (lApiKey) setLightningApiKey(lApiKey);
+
+    const lModel = localStorage.getItem('lightning_model_v1');
+    if (lModel) setLightningModel(lModel);
+
+    const lUrl = localStorage.getItem('lightning_base_url_v1');
+    if (lUrl) setLightningBaseUrl(lUrl);
+
+    const oModel = localStorage.getItem('ollama_model_v1');
+    if (oModel) setOllamaModel(oModel);
+
+    const oUrl = localStorage.getItem('ollama_base_url_v1');
+    if (oUrl) setOllamaBaseUrl(oUrl);
+
+    // Cargar el diccionario aprendido en el cliente
+    const dict = loadCustomDict();
+    setCustomDict(dict);
+  }, []);
 
   const updateAiProvider = (prov: 'groq' | 'mimo' | 'lightning' | 'ollama') => {
     setAiProvider(prov);
