@@ -181,6 +181,25 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
   return false;
 }
 
+export function matchMaterial(matDescUp: string, synonymPhrase: string): boolean {
+  const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
+  const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'CAMBIOS', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'INSTALACION', 'REEMPLAZAR', 'REEMPLAZO', 'COLOCA', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN', 'CAMBIANDO', 'COLOCANDO']);
+
+  const phraseWords = synonymPhrase.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && !stopWords.has(w) && !actionWords.has(w));
+  if (phraseWords.length === 0) return false;
+
+  const matWords = matDescUp.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && !stopWords.has(w));
+
+  return phraseWords.every(pWord => {
+    return matWords.some(mWord => {
+      if (mWord === pWord) return true;
+      if (mWord === pWord + 'S') return true;
+      if (mWord === pWord + 'ES') return true;
+      return isFuzzyMatch(mWord, pWord);
+    });
+  });
+}
+
 /**
  * Set de verbos de acción a excluir cuando se buscan sinónimos de repuestos
  * dentro de una tarea (para que, p.ej., la palabra "ENGRASE" no se confunda
@@ -420,7 +439,7 @@ export function runAudit(
       const missingCategories: string[] = [];
       for (const cat of matchedCategories) {
         const matsKws = activeParts[cat];
-        const found = matList.some(m => matsKws.some(mk => m.includes(up(mk))));
+        const found = matList.some(m => matsKws.some(mk => matchMaterial(m, up(mk))));
         if (!found) missingCategories.push(cat);
       }
 
