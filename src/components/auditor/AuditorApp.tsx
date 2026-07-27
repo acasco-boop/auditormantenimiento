@@ -24,7 +24,7 @@ import {
   Settings, Eye, EyeOff
 } from 'lucide-react';
 import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
-import { runAudit, up, ACTION_WORDS } from '@/lib/audit-engine';
+import { runAudit, up, ACTION_WORDS, explicitReplacementNeeded } from '@/lib/audit-engine';
 import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
 import { requestOMCoherence, type CoherenceCheckResult } from '@/lib/ai-coherence';
 import { parseTabularFile, esc, thinBorder } from './shared-utils';
