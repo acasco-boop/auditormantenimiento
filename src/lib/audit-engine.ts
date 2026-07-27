@@ -101,14 +101,52 @@ export function getActionType(tareaUp: string): ActionType | null {
 
 export function explicitReplacementNeeded(tareaUp: string): boolean {
   if (!tareaUp) return false;
-  const controlKw = ['CONTROLAR','REVISION','REVISAR','CHEQUEAR','CONTROL'];
-  if (controlKw.some(k => tareaUp.includes(k)) && tareaUp.includes('SELECTORA')) return false;
-  const revKw = ['REVISION','REVISAR','CHEQUEAR'];
-  if (revKw.some(k => tareaUp.includes(k))) return false;
 
-  // Una tarea requiere cruce de materiales si contiene cualquier verbo de
-  // acción reconocido (Cambio/Cambiar, Coloco/Colocar, Agregar, Engrase, etc.)
-  return getActionType(tareaUp) !== null;
+  // 1. Si contiene palabras de control, regulación, ajuste o mantenimiento,
+  // pero NO contiene verbos explícitos de cambio/colocación
+  const controlVerbs = [
+    'CONTROLAR', 'CONTROL', 'REVISAR', 'REVISION', 'CHEQUEAR', 'CHEQUEO',
+    'REGULAR', 'REGULACION', 'AJUSTAR', 'AJUSTE', 'LIMPIAR', 'LIMPIEZA',
+    'LUBRICAR', 'LUBRICACION', 'ENGRASE', 'ENGRASAR', 'SOLDAR', 'REFORZAR',
+    'REPARAR', 'REPARACION', 'MEDIR', 'MEDICION'
+  ];
+
+  const hasControlVerb = controlVerbs.some(k => tareaUp.includes(k));
+
+  const explicitActions = [
+    'CAMBIAR', 'COLOCAR', 'INSTALAR', 'REEMPLAZAR', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN'
+  ];
+
+  if (hasControlVerb) {
+    const hasExplicitAction = explicitActions.some(k => tareaUp.includes(k));
+    const hasActiveCambio = tareaUp.includes('CAMBIO') && !tareaUp.includes('DE CAMBIO') && !tareaUp.includes('DE CAMBIOS');
+    const hasActiveColoco = tareaUp.includes('COLOCO') && !tareaUp.includes('DE COLOCO');
+    
+    if (!hasExplicitAction && !hasActiveCambio && !hasActiveColoco) {
+      return false;
+    }
+  }
+
+  // 2. Si no tiene verbos de control o pasó el filtro, validamos si tiene un tipo de acción válido,
+  // descartando "CAMBIO/CAMBIOS" cuando vienen precedidos por "DE" (sustantivo de caja/palanca de cambios)
+  const actionType = getActionType(tareaUp);
+  if (actionType === null) return false;
+
+  // Doble verificación: si la acción detectada es REEMPLAZO debido a la palabra CAMBIO/CAMBIOS
+  // pero todas las apariciones de CAMBIO/CAMBIOS están precedidas por "DE", entonces lo ignoramos.
+  const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
+  const hasOnlyNounCambios = words.every((word, idx) => {
+    if (word === 'CAMBIO' || word === 'CAMBIOS') {
+      return idx > 0 && words[idx - 1] === 'DE';
+    }
+    return true;
+  });
+
+  if (hasOnlyNounCambios && !explicitActions.some(k => tareaUp.includes(k)) && !tareaUp.includes('COLOCO')) {
+    return false;
+  }
+
+  return true;
 }
 
 function levenshtein(a: string, b: string): number {
