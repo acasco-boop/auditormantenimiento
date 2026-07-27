@@ -385,6 +385,10 @@ export default function AuditorApp() {
   const [coherenceError, setCoherenceError] = useState<string | null>(null);
   const [coherenceLoading, setCoherenceLoading] = useState(false);
 
+  // Reporte de Cierres OK States
+  const [closingSearch, setClosingSearch] = useState('');
+  const [closingTypeFilter, setClosingTypeFilter] = useState<'ALL' | 'WITH_MAT' | 'WITHOUT_MAT'>('ALL');
+
   // AI Configuration States
   const [aiProvider, setAiProvider] = useState<'groq' | 'mimo' | 'lightning'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('ai_provider_v1') as any) || 'groq';
@@ -497,6 +501,149 @@ export default function AuditorApp() {
   const unrecognizedTasks = auditOutput?.unrecognizedTasks || [];
   const metrics = auditOutput?.metrics || { c1: 0, c2: 0, c3: 0, b1: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b3: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] } };
   const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
+
+  const closingReport = React.useMemo(() => {
+    if (!dfTar) return [];
+
+    // Agrupar tareas por Orden (DocNum o Nro. Orden)
+    const tasksByOrder: Record<string, TareaRow[]> = {};
+    dfTar.forEach(t => {
+      const order = String(t['Nro. Orden'] || t['DocNum'] || '');
+      if (!order) return;
+      if (!tasksByOrder[order]) tasksByOrder[order] = [];
+      tasksByOrder[order].push(t);
+    });
+
+    // Guardar las órdenes con discrepancias para excluirlas
+    const findingsByOrder = new Set(results.map(r => String(r['Nro. Orden'])));
+
+    // Materiales cargados por orden
+    const matByOrder = auditOutput?.matByOrder || {};
+
+    // Agrupar metadatos de órdenes de dfOrd
+    const ordByOrder: Record<string, {
+      tipoOrden: string;
+      centrosCostos: string;
+      contabilizada: string;
+      fechaOrden: string;
+      statusDoc: string;
+    }> = {};
+
+    const formatDate = (val: any): string => {
+      if (!val) return '';
+      const str = String(val).trim();
+      const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        return `${match[3]}/${match[2]}/${match[1]}`;
+      }
+      const parsed = Date.parse(str);
+      if (!isNaN(parsed)) {
+        const dateObj = new Date(parsed);
+        const d = dateObj.getDate().toString().padStart(2, '0');
+        const m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+        const y = dateObj.getFullYear();
+        return `${d}/${m}/${y}`;
+      }
+      return str;
+    };
+
+    if (dfOrd && dfOrd.length > 0) {
+      dfOrd.forEach(r => {
+        const key = String(r['Nro. orden'] ?? '');
+        if (!key) return;
+        if (!ordByOrder[key]) {
+          ordByOrder[key] = {
+            tipoOrden: String(r['Tipo de orden'] || '').trim(),
+            centrosCostos: String(r['Centos de costos'] || '').trim(),
+            contabilizada: String(r['Contabilizada'] || '').trim(),
+            fechaOrden: formatDate(r['Fecha de la orden']),
+            statusDoc: String(r['Status de documento'] || '').trim(),
+          };
+        }
+      });
+    }
+
+    const report: Array<{
+      order: string;
+      equipo: string;
+      nombreEquipo: string;
+      tipo: 'Con Materiales' | 'Sin Materiales (Solo Servicio/Control)';
+      tasks: Array<{ tarea: string; estado: string; requiereMaterial: boolean }>;
+      materials: Array<{ desc: string; salidas: number }>;
+      tipoOrden?: string;
+      centrosCostos?: string;
+      contabilizada?: string;
+      fechaOrden?: string;
+      statusDoc?: string;
+    }> = [];
+
+    Object.entries(tasksByOrder).forEach(([order, oTasks]) => {
+      // Si la orden tiene observaciones/desconexiones en resultados, no califica para cierre exitoso
+      if (findingsByOrder.has(order)) return;
+
+      const parsedTasks = oTasks.map(t => {
+        const tarea = String(t['Tarea'] || '');
+        const tareaUp = up(tarea);
+        const reqMat = explicitReplacementNeeded(tareaUp);
+        const estado = String(t['Estado'] || '').trim();
+        // Verificar si está en un estado terminado/completo
+        const isTerminada = ['TERMINADA', 'TERMINADO', 'CERRADA', 'CERRADO', 'COMPLETO', 'COMPLETA'].includes(estado.toUpperCase());
+        return { tarea, estado, requiereMaterial: reqMat, isTerminada };
+      });
+
+      // Todas las tareas asignadas a la orden de mantenimiento deben estar completadas
+      const allTasksTerminadas = parsedTasks.every(t => t.isTerminada);
+      if (!allTasksTerminadas) return;
+
+      const oMats = matByOrder[order] || [];
+      const hasMaterials = oMats.length > 0;
+      const hasTaskWithMaterial = parsedTasks.some(t => t.requiereMaterial);
+
+      let tipo: 'Con Materiales' | 'Sin Materiales (Solo Servicio/Control)';
+      if (hasTaskWithMaterial) {
+        tipo = 'Con Materiales';
+        // Debe tener algún material cargado y con salidas físicas reales > 0
+        if (!hasMaterials) return;
+        const totalSalidas = oMats.reduce((sum, m) => sum + parseFloat(String(m['Salidas'] || 0)), 0);
+        if (totalSalidas === 0) return;
+      } else {
+        tipo = 'Sin Materiales (Solo Servicio/Control)';
+      }
+
+      const firstTask = oTasks[0];
+      const ordData = ordByOrder[order];
+
+      report.push({
+        order,
+        equipo: String(firstTask['Codigo equipo'] || ''),
+        nombreEquipo: String(firstTask['Nombre Equipo'] || ''),
+        tipo,
+        tasks: parsedTasks.map(pt => ({ tarea: pt.tarea, estado: pt.estado, requiereMaterial: pt.requiereMaterial })),
+        materials: oMats.map(m => ({ desc: String(m['Desc. Artículo'] || ''), salidas: parseFloat(String(m['Salidas'] || 0)) })),
+        tipoOrden: ordData?.tipoOrden,
+        centrosCostos: ordData?.centrosCostos,
+        contabilizada: ordData?.contabilizada,
+        fechaOrden: ordData?.fechaOrden,
+        statusDoc: ordData?.statusDoc,
+      });
+    });
+
+    return report;
+  }, [dfTar, results, auditOutput, dfOrd]);
+
+  const filteredClosingReport = React.useMemo(() => {
+    return closingReport.filter(r => {
+      const matchesSearch = r.order.includes(closingSearch) || 
+                            r.equipo.toUpperCase().includes(closingSearch.toUpperCase()) || 
+                            r.nombreEquipo.toUpperCase().includes(closingSearch.toUpperCase());
+      
+      const matchesType = closingTypeFilter === 'ALL' ||
+                          (closingTypeFilter === 'WITH_MAT' && r.tipo === 'Con Materiales') ||
+                          (closingTypeFilter === 'WITHOUT_MAT' && r.tipo === 'Sin Materiales (Solo Servicio/Control)');
+                          
+      return matchesSearch && matchesType;
+    });
+  }, [closingReport, closingSearch, closingTypeFilter]);
 
   const analyzedTasksRef = useRef<Set<string>>(new Set());
 
@@ -670,6 +817,97 @@ Lista de tareas:\n${listado}`;
     a.href = url; a.download = 'Auditoria_Mantenimiento_Generado.xlsx';
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }, [results]);
+
+  const handleExportClosingExcel = useCallback(async () => {
+    if (closingReport.length === 0) return;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Órdenes OK Cierre');
+    const cols = [
+      'Nro. Orden', 'Tipo de orden', 'Centros de costos', 
+      'Contabilizada', 'Fecha de la orden', 'Status de documento', 
+      'Equipo', 'Nombre Equipo', 'Tipo de Cierre', 'Tareas', 'Materiales Consumidos'
+    ];
+    ws.addRow(cols);
+    
+    closingReport.forEach(r => {
+      const taskStr = r.tasks.map(t => `${t.tarea} (${t.estado})`).join(' | ');
+      const matStr = r.materials.map(m => `${m.desc} (Cant: ${m.salidas})`).join(' | ');
+      ws.addRow([
+        r.order,
+        r.tipoOrden || '',
+        r.centrosCostos || '',
+        r.contabilizada || '',
+        r.fechaOrden || '',
+        r.statusDoc || '',
+        r.equipo,
+        r.nombreEquipo,
+        r.tipo,
+        taskStr,
+        matStr
+      ]);
+    });
+    
+    const headerRow = ws.getRow(1);
+    headerRow.eachCell(cell => {
+      cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = thinBorder();
+    });
+
+    const centerAlignCols = [1, 2, 4, 5, 6, 7, 9];
+    for (let i = 0; i < closingReport.length; i++) {
+      const rowIdx = i + 2;
+      const row = ws.getRow(rowIdx);
+      const altFill = rowIdx % 2 === 0 ? 'FFF9FAFB' : null;
+      
+      row.eachCell((cell, colIdx) => {
+        cell.font = { name: 'Arial', size: 10 };
+        cell.border = thinBorder();
+        
+        if (centerAlignCols.includes(colIdx)) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else {
+          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
+        }
+        
+        if (colIdx === 9) { // Tipo de Cierre
+          const typeVal = String(cell.value);
+          if (typeVal.startsWith('Con')) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+            cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF375623' } };
+          } else {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+            cell.font = { name: 'Arial', size: 10, color: { argb: 'FF595959' } };
+          }
+        } else if (altFill) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: altFill } };
+        }
+      });
+    }
+
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: closingReport.length + 1, column: cols.length } };
+    
+    ws.columns.forEach(column => {
+      let maxLen = 0;
+      column.eachCell!({ includeEmpty: true }, cell => {
+        const valStr = cell.value ? String(cell.value) : '';
+        if (valStr.length > maxLen) maxLen = valStr.length;
+      });
+      column.width = Math.min(Math.max(maxLen + 3, 10), 50);
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Ordenes_OK_para_Cierre_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [closingReport]);
 
   const handleAnalyzeIA = useCallback(async () => {
     const fila = results.find(r => String(r['Nro. Orden']) === selectedOrder);
@@ -1045,6 +1283,10 @@ Lista de tareas:\n${listado}`;
               <Wrench className="w-3.5 h-3.5" />
               Mantenimiento & Stock
             </TabsTrigger>
+            <TabsTrigger value="cierre" className="rounded-xl px-5 py-2.5 text-xs font-semibold data-[state=active]:bg-gradient-to-r data-[state=active]:from-emerald-500/20 data-[state=active]:to-green-500/10 data-[state=active]:text-emerald-100 data-[state=active]:shadow-lg data-[state=active]:shadow-emerald-500/5 text-slate-400 gap-2 transition-all">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Órdenes OK para Cierre
+            </TabsTrigger>
             <TabsTrigger value="ov" className="rounded-xl px-5 py-2.5 text-xs font-semibold data-[state=active]:bg-gradient-to-r data-[state=active]:from-cyan-500/20 data-[state=active]:to-blue-500/10 data-[state=active]:text-cyan-100 data-[state=active]:shadow-lg data-[state=active]:shadow-cyan-500/5 text-slate-400 gap-2 transition-all">
               <ShoppingCart className="w-3.5 h-3.5" />
               OV vs Materiales
@@ -1417,6 +1659,181 @@ Lista de tareas:\n${listado}`;
             </div>
           </section>
         )}
+          </TabsContent>
+
+          </TabsContent>
+
+          <TabsContent value="cierre" className="space-y-6 mt-6 animate-fade-in-up">
+            {/* Report Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="glass-card border border-white/[0.06] shadow-lg rounded-2xl overflow-hidden relative">
+                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-slate-400 text-xs font-semibold tracking-wider uppercase">Cierres OK Totales</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold text-white tracking-tight font-mono">
+                      {closingReport.length}
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">órdenes</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2">Órdenes sin discrepancias listas para archivar</p>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card border border-white/[0.06] shadow-lg rounded-2xl overflow-hidden relative">
+                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-slate-400 text-xs font-semibold tracking-wider uppercase">Cierres con Materiales</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold text-white tracking-tight font-mono">
+                      {closingReport.filter(r => r.tipo === 'Con Materiales').length}
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">órdenes</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2">Con recambios y salidas de repuestos en SAP</p>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card border border-white/[0.06] shadow-lg rounded-2xl overflow-hidden relative">
+                <div className="absolute top-0 left-0 w-1 h-full bg-slate-500" />
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-slate-400 text-xs font-semibold tracking-wider uppercase">Cierres de Solo Servicio</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold text-white tracking-tight font-mono">
+                      {closingReport.filter(r => r.tipo === 'Sin Materiales (Solo Servicio/Control)').length}
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">órdenes</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2">Solo controles, ajustes y mano de obra finalizados</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Filters */}
+            <div className="glass-card rounded-2xl p-5 border border-white/[0.06] flex flex-col md:flex-row gap-4 items-center justify-between">
+              <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto items-center">
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
+                  <Input
+                    placeholder="Buscar por OM o Equipo..."
+                    value={closingSearch}
+                    onChange={e => setClosingSearch(e.target.value)}
+                    className="bg-white/[0.03] border-white/[0.06] pl-9 text-xs h-9 rounded-xl text-amber-100"
+                  />
+                </div>
+                <Select value={closingTypeFilter} onValueChange={(val: any) => setClosingTypeFilter(val)}>
+                  <SelectTrigger className="bg-white/[0.03] border-white/[0.06] text-xs h-9 rounded-xl text-amber-100 w-full md:w-60">
+                    <SelectValue placeholder="Filtrar por tipo..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-950/95 backdrop-blur-2xl border-white/[0.08] text-slate-200">
+                    <SelectItem value="ALL">Todos los cierres</SelectItem>
+                    <SelectItem value="WITH_MAT">Con Materiales</SelectItem>
+                    <SelectItem value="WITHOUT_MAT">Sin Materiales (Solo Servicio/Control)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {closingReport.length > 0 && (
+                <Button
+                  onClick={handleExportClosingExcel}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs gap-1.5 rounded-xl h-9 w-full md:w-auto shadow-lg shadow-emerald-600/10 transition-all shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Exportar Cierres OK
+                </Button>
+              )}
+            </div>
+
+            {/* Table */}
+            <div className="glass-card rounded-2xl border border-white/[0.06] overflow-hidden shadow-2xl">
+              <div className="p-5 border-b border-white/[0.06] flex items-center justify-between bg-white/[0.01]">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Órdenes OK para Cierre</h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Listado detallado de órdenes listas para cierre administrativo</p>
+                </div>
+                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-3 py-1 font-mono text-xs rounded-xl">
+                  {filteredClosingReport.length} filtradas
+                </Badge>
+              </div>
+
+              {filteredClosingReport.length === 0 ? (
+                <div className="p-8 text-center">
+                  <p className="text-xs text-slate-500 italic">No se encontraron órdenes OK para cierre con los filtros aplicados.</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  <Table>
+                    <TableHeader className="bg-white/[0.01] border-b border-white/[0.06]">
+                      <TableRow className="border-b border-white/[0.06] hover:bg-transparent">
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10 w-24 text-center">Nro. OM</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10 w-44">Equipo</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10 w-48 text-center">Tipo de Cierre</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10">Tareas Realizadas (Terminadas)</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10">Materiales Consumidos</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10 w-24 text-center">Fecha OM</TableHead>
+                        <TableHead className="text-xs font-semibold text-slate-400 h-10 w-24 text-center">Status Doc</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredClosingReport.map((r) => (
+                        <TableRow key={r.order} className="border-b border-white/[0.04] hover:bg-white/[0.01] transition-colors">
+                          <TableCell className="text-xs font-bold text-white font-mono text-center">{r.order}</TableCell>
+                          <TableCell className="text-xs">
+                            <div className="font-semibold text-slate-200">{r.equipo}</div>
+                            <div className="text-[10px] text-slate-500 truncate max-w-[160px]">{r.nombreEquipo}</div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge
+                              className={`text-[10px] rounded-lg px-2 py-0.5 border ${
+                                r.tipo === 'Con Materiales'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  : 'bg-slate-500/10 text-slate-400 border-white/[0.06]'
+                              }`}
+                            >
+                              {r.tipo}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <div className="space-y-1">
+                              {r.tasks.map((t, i) => (
+                                <div key={i} className="flex items-start gap-1.5 leading-tight">
+                                  <span className="text-emerald-500 text-[10px] mt-0.5">✓</span>
+                                  <span className="text-slate-300 font-mono text-[11px]">{t.tarea}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {r.materials.length === 0 ? (
+                              <span className="text-slate-500 italic text-[11px]">Sin materiales (solo mano de obra)</span>
+                            ) : (
+                              <div className="space-y-1">
+                                {r.materials.map((m, i) => (
+                                  <div key={i} className="flex items-center gap-1.5 leading-none">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                                    <span className="text-slate-300 font-mono text-[11px]">
+                                      {m.desc} <span className="text-blue-400 font-semibold">(Cant: {m.salidas})</span>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-slate-400 font-mono text-center">{r.fechaOrden || '-'}</TableCell>
+                          <TableCell className="text-xs text-slate-400 font-mono text-center">{r.statusDoc || '-'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="ov" className="mt-6">
