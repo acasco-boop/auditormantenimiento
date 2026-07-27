@@ -1659,11 +1659,9 @@ Lista de tareas:\n${listado}`;
             </div>
           </section>
         )}
-          </TabsContent>
+      </TabsContent>
 
-          </TabsContent>
-
-          <TabsContent value="cierre" className="space-y-6 mt-6 animate-fade-in-up">
+      <TabsContent value="cierre" className="space-y-6 mt-6 animate-fade-in-up">
             {/* Report Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="glass-card border border-white/[0.06] shadow-lg rounded-2xl overflow-hidden relative">
