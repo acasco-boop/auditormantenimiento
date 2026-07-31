@@ -195,6 +195,8 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string, tareaUp?
       if (mWord === pWord) return true;
       if (mWord === pWord + 'S') return true;
       if (mWord === pWord + 'ES') return true;
+      // Soporte explícito para la abreviación frecuente de ACEITE como AC o AC.
+      if ((pWord === 'AC' || pWord === 'AC.') && mWord === 'ACEITE') return true;
       return isFuzzyMatch(mWord, pWord);
     });
   });
@@ -265,14 +267,14 @@ export const ACTION_WORDS = new Set(Object.keys(ACTION_SYNONYMS));
 
 export function getMatchingCategories(tareaUp: string, activeParts: Record<string, string[]>): string[] {
   const matches: string[] = [];
-  const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
+  const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA', 'Y', 'O', 'LA', 'EL', 'EN', 'UN', 'AL', 'DI', 'SU']);
   const actionWords = ACTION_WORDS;
   
   const isValidSynonym = (syn: string) => {
     const s = syn.trim();
     if (!s) return false;
     if (s.includes(' ')) return true; // Las frases compuestas siempre son válidas (ej. "CAJA DE CAMBIO" es una frase válida)
-    if (s.length <= 2) return false;   // Descartar conectores de 1 o 2 letras
+    if (s.length < 2) return false;    // Descartar conectores de 1 sola letra (ej: 'y', 'o', 'a')
     if (stopWords.has(s)) return false; // Descartar stop-words comunes
     if (actionWords.has(s)) return false; // Descartar verbos de cambio genéricos (evita que "CAMBIO" sea un sinónimo válido por sí solo)
     return true;
@@ -288,6 +290,8 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
     if (taskWord === syn) return true;
     if (taskWord === syn + 'S') return true;  // Soporte para plurales
     if (taskWord === syn + 'ES') return true; // Soporte para plurales
+    // Soporte explícito para la abreviación frecuente de ACEITE como AC o AC.
+    if ((taskWord === 'AC' || taskWord === 'AC.') && syn === 'ACEITE') return true;
     return false;
   };
 
