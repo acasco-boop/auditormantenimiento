@@ -181,8 +181,8 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
   return false;
 }
 
-export function matchMaterial(matDescUp: string, synonymPhrase: string): boolean {
-  const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA']);
+export function matchMaterial(matDescUp: string, synonymPhrase: string, tareaUp?: string, activeParts?: Record<string, string[]>): boolean {
+  const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA', 'Y', 'O', 'LA', 'EL']);
   const actionWords = new Set(['CAMBIAR', 'CAMBIO', 'CAMBIOS', 'COLOCAR', 'COLOCACION', 'INSTALAR', 'INSTALACION', 'REEMPLAZAR', 'REEMPLAZO', 'COLOCA', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN', 'CAMBIANDO', 'COLOCANDO']);
 
   const phraseWords = synonymPhrase.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && !stopWords.has(w) && !actionWords.has(w));
@@ -190,7 +190,7 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string): boolean
 
   const matWords = matDescUp.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && !stopWords.has(w));
 
-  return phraseWords.every(pWord => {
+  const baseMatch = phraseWords.every(pWord => {
     return matWords.some(mWord => {
       if (mWord === pWord) return true;
       if (mWord === pWord + 'S') return true;
@@ -198,6 +198,61 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string): boolean
       return isFuzzyMatch(mWord, pWord);
     });
   });
+
+  if (!baseMatch) return false;
+
+  // Si se provee la tarea, validar concordancia de contexto
+  if (tareaUp && activeParts) {
+    const isNeumatico = synonymPhrase.includes('CUBIERTA') || synonymPhrase.includes('NEUMATICO') || synonymPhrase.includes('RODADO');
+    if (!isNeumatico) {
+      const CONTEXT_WORDS = new Set([
+        'EJE', 'BALANCIN', 'MOTOR', 'CAJA', 'FRENO', 'DIRECCION', 'SUSPENSION', 'CABINA', 'ACOPLADO', 'RUEDA',
+        'DIFERENCIAL', 'TRANSMISION', 'ESCAPE', 'EMBRAGUE', 'TURBO', 'INTERCOOLER', 'RADIADOR', 'CALEFACCION',
+        'AIRE', 'AGUA', 'COMBUSTIBLE', 'ACEITE', 'GRASA', 'FILTRO', 'CORREA', 'ALTERNADOR', 'ARRANQUE', 'BATERIA',
+        'VALVULA', 'TACO', 'LONA', 'SEMI', 'QUINTA', 'ACOPLE', 'RULEMAN', 'RODAMIENTO', 'RETEN', 'JUNTA', 'TERMOSTATO',
+        'ESCOBILLA', 'ROTULA', 'CRUCETA', 'TENSOR', 'CERRADURA', 'BISAGRA', 'PARAGOLPE', 'GUARDABARRO', 'CADENA',
+        'PINON', 'CORONA', 'COMPRESOR', 'BOCINA', 'FUSIBLE', 'DISCO', 'PASTILLA', 'ESPEJO', 'OPTICA', 'FARO', 'LAMPARA',
+        'FOCO', 'LED', 'REFRIGERANTE'
+      ]);
+
+      for (const cat in activeParts) {
+        CONTEXT_WORDS.add(up(cat));
+        (activeParts[cat] || []).forEach(syn => {
+          up(syn).split(/[^A-Z0-9]/).forEach(w => {
+            const cleanW = w.trim();
+            if (cleanW.length > 2 && !stopWords.has(cleanW) && !actionWords.has(cleanW)) {
+              CONTEXT_WORDS.add(cleanW);
+            }
+          });
+        });
+      }
+
+      const taskWords = tareaUp.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && !stopWords.has(w) && !actionWords.has(w));
+      const taskContextWords = taskWords.filter(w => CONTEXT_WORDS.has(w));
+
+      const matContextWords = matWords.filter(w => CONTEXT_WORDS.has(w));
+
+      const phraseWordsSet = new Set(phraseWords);
+      const cleanTaskContext = taskContextWords.filter(w => !phraseWordsSet.has(w));
+      const cleanMatContext = matContextWords.filter(w => !phraseWordsSet.has(w));
+
+      if (cleanTaskContext.length > 0 && cleanMatContext.length > 0) {
+        const hasOverlap = cleanMatContext.some(mW => {
+          return cleanTaskContext.some(tW => {
+            if (mW === tW) return true;
+            if (mW === tW + 'S' || mW === tW + 'ES') return true;
+            return isFuzzyMatch(mW, tW);
+          });
+        });
+        
+        if (!hasOverlap) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -439,7 +494,7 @@ export function runAudit(
       const missingCategories: string[] = [];
       for (const cat of matchedCategories) {
         const matsKws = activeParts[cat];
-        const found = matList.some(m => matsKws.some(mk => matchMaterial(m, up(mk))));
+        const found = matList.some(m => matsKws.some(mk => matchMaterial(m, up(mk), tareaUp, activeParts)));
         if (!found) missingCategories.push(cat);
       }
 
