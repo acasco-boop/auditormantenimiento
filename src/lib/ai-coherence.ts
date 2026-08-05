@@ -42,13 +42,17 @@ Tu trabajo es evaluar si existe COHERENCIA entre lo que dicen las tareas y lo qu
 - Una tarea de "Engrase"/"Engrasar" debería tener asociado un material de tipo grasa o lubricante (no un repuesto físico).
 - Una tarea de "Cambio"/"Cambiar"/"Colocar" de una pieza debería tener asociado un repuesto físico de esa familia (no simplemente un insumo genérico).
 - Si una tarea no tiene ningún material asociado, o el material asociado no corresponde en absoluto al tipo de trabajo descripto, es una discrepancia.
+- IMPORTANTE (Cruce exacto de palabras de contexto): Debés verificar cada sustantivo descriptivo de la tarea contra la descripción del material de pañol. Por ejemplo:
+  * Si la tarea es "Cambiar cubierta de Eje Balancín" (que es una tapa del motor) y el material cargado es "Cubierta Taco" (que es un neumático/goma), esto es una DISCREPANCIA (no coherente) porque se trata de piezas completamente distintas. Ambas contienen la palabra "cubierta" pero difieren en el contexto ("Eje Balancín" vs "Taco").
+  * Si la tarea es "Cambiar correa de alternador" y el material cargado es "Correa de ventilador", es una DISCREPANCIA (no coherente).
+  * Exigí que las palabras determinantes de contexto coincidan para dar por válida la OM.
 
 Respondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin explicaciones, sin markdown, con EXACTAMENTE este formato:
 {"coherente": boolean, "discrepancia_detectada": "string", "sugerencia_control": "string"}
 
 Reglas de contenido:
-- "coherente": true si las tareas y los materiales de esta OM son consistentes entre sí; false si hay algún desvío relevante.
-- "discrepancia_detectada": si coherente es false, describí en máximo 2 renglones y en español de Argentina cuál es la inconsistencia puntual. Si coherente es true, devolvé un string vacío "".
+- "coherente": true si las tareas y los materiales de esta OM son consistentes entre sí; false si hay algún desvío o cruce erróneo de contexto relevante.
+- "discrepancia_detectada": si coherente es false, describí en máximo 2 renglones y en español de Argentina cuál es la inconsistencia puntual (ej: "Cubierta Taco cargada para cambio de cubierta de eje balancín"). Si coherente es true, devolvé un string vacío "".
 - "sugerencia_control": una acción correctiva breve y concreta que debería tomar el supervisor de taller o el encargado de pañol. Si coherente es true y no hay nada para sugerir, devolvé un string vacío "".`;
 
 /** Arma el payload JSON comprimido de una OM a partir de las tareas y materiales crudos. */

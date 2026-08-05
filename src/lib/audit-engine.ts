@@ -37,6 +37,19 @@ export function formatDate(val: any): string {
   return str;
 }
 
+export function isInsumoOFerreteria(textUp: string): boolean {
+  const keywords = [
+    'TORNILLO', 'TUERCA', 'BULON', 'BULON', 'ARANDELA', 'ABRAZADERA', 'PRECINTO', 
+    'CINTA', 'PEGAMENTO', 'SILICONA', 'TRAPO', 'DISCO DE CORTE', 'DISCO DE DESBASTE', 
+    'LIJA', 'HERRAMIENTA', 'PINTURA', 'SELLADOR', 'ALAMBRE', 'GRILLETE', 
+    'PASADOR', 'ELECTRODO', 'SELLAR', 'TIE WRAP', 'ZIPTIE', 'PRECINTOS', 
+    'BULONES', 'TORNILLOS', 'TUERCAS', 'ARANDELAS', 'ABRAZADERAS', 'SELLADORES', 
+    'MANGUITO', 'ORING', 'O-RING'
+  ];
+  const cleanText = up(textUp);
+  return keywords.some(kw => cleanText.includes(up(kw)));
+}
+
 // ---------------------------------------------------------------------------
 // Normalización de verbos/acciones de taller.
 //
@@ -448,6 +461,7 @@ export function runAudit(
   dfTar.forEach(row => {
     const tarea = row['Tarea'] === null || row['Tarea'] === undefined ? '' : String(row['Tarea']);
     const tareaUp = up(tarea);
+    if (isInsumoOFerreteria(tareaUp)) return;
     if (!explicitReplacementNeeded(tareaUp)) return;
 
     const order = row['Nro. Orden']!;
@@ -469,7 +483,7 @@ export function runAudit(
     }
 
     const mats = matByOrder[String(order)] || [];
-    const matList = mats.map(m => up(m['Desc. Artículo']));
+    const matList = mats.filter(m => !isInsumoOFerreteria(up(m['Desc. Artículo'] || ''))).map(m => up(m['Desc. Artículo']));
     const totalSalidas = mats.reduce((acc, m) => {
       const v = parseFloat(String(m['Salidas']));
       return acc + (isNaN(v) ? 0 : v);
@@ -551,6 +565,7 @@ export function runAudit(
     issuedMats.forEach(m => {
       const matDesc = String(m['Desc. Artículo'] || '');
       const matDescUp = up(matDesc);
+      if (isInsumoOFerreteria(matDescUp)) return;
 
       // Encontrar a qué categorías del diccionario corresponde el material
       const matchedCatsByMat = Object.keys(activeParts).filter(cat => {
