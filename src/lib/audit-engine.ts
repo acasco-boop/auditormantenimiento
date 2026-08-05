@@ -116,12 +116,12 @@ export function explicitReplacementNeeded(tareaUp: string): boolean {
   if (!tareaUp) return false;
 
   // 1. Si contiene palabras de control, regulación, ajuste o mantenimiento,
-  // pero NO contiene verbos explícitos de cambio/colocación
+  // pero NO contiene verbos explícitos de cambio/colocación.
+  // Quitamos LUBRICAR, LUBRICACION, ENGRASE, ENGRASAR porque son tareas que consumen insumos reales (aceite/grasa)
   const controlVerbs = [
     'CONTROLAR', 'CONTROL', 'REVISAR', 'REVISION', 'CHEQUEAR', 'CHEQUEO',
     'REGULAR', 'REGULACION', 'AJUSTAR', 'AJUSTE', 'LIMPIAR', 'LIMPIEZA',
-    'LUBRICAR', 'LUBRICACION', 'ENGRASE', 'ENGRASAR', 'SOLDAR', 'REFORZAR',
-    'REPARAR', 'REPARACION', 'MEDIR', 'MEDICION'
+    'SOLDAR', 'REFORZAR', 'REPARAR', 'REPARACION', 'MEDIR', 'MEDICION'
   ];
 
   const hasControlVerb = controlVerbs.some(k => tareaUp.includes(k));
@@ -148,15 +148,18 @@ export function explicitReplacementNeeded(tareaUp: string): boolean {
   // Doble verificación: si la acción detectada es REEMPLAZO debido a la palabra CAMBIO/CAMBIOS
   // pero todas las apariciones de CAMBIO/CAMBIOS están precedidas por "DE", entonces lo ignoramos.
   const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
-  const hasOnlyNounCambios = words.every((word, idx) => {
-    if (word === 'CAMBIO' || word === 'CAMBIOS') {
-      return idx > 0 && words[idx - 1] === 'DE';
-    }
-    return true;
-  });
+  const hasCambio = words.includes('CAMBIO') || words.includes('CAMBIOS');
+  if (hasCambio) {
+    const hasOnlyNounCambios = words.every((word, idx) => {
+      if (word === 'CAMBIO' || word === 'CAMBIOS') {
+        return idx > 0 && words[idx - 1] === 'DE';
+      }
+      return true;
+    });
 
-  if (hasOnlyNounCambios && !explicitActions.some(k => tareaUp.includes(k)) && !tareaUp.includes('COLOCO')) {
-    return false;
+    if (hasOnlyNounCambios && !explicitActions.some(k => tareaUp.includes(k)) && !tareaUp.includes('COLOCO')) {
+      return false;
+    }
   }
 
   return true;
