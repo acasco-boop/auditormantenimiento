@@ -391,8 +391,8 @@ export interface AuditOutput {
   unrecognizedTasks: UnrecognizedTask[];
   matByOrder: Record<string, MaterialRow[]>;
   metrics: {
-    c1: number; c2: number; c3: number;
-    b1: MetricBreakdown; b2: MetricBreakdown; b3: MetricBreakdown;
+    c1: number; c2: number; c3: number; c4: number;
+    b1: MetricBreakdown; b2: MetricBreakdown; b3: MetricBreakdown; b4: MetricBreakdown;
   };
 }
 
@@ -443,6 +443,7 @@ export function runAudit(
   const activeParts = { ...PARTS_TO_CHECK, ...customDict };
   const unrecognizedMap: Record<string, UnrecognizedTask> = {};
   const results: AuditResult[] = [];
+  const orderReplacementCats: Record<string, Set<string>> = {};
 
   dfTar.forEach(row => {
     const tarea = row['Tarea'] === null || row['Tarea'] === undefined ? '' : String(row['Tarea']);
@@ -452,6 +453,14 @@ export function runAudit(
     const order = row['Nro. Orden']!;
 
     const matchedCategories = getMatchingCategories(tareaUp, activeParts);
+    const orderStr = String(order);
+    if (!orderReplacementCats[orderStr]) {
+      orderReplacementCats[orderStr] = new Set();
+    }
+    matchedCategories.forEach(cat => {
+      orderReplacementCats[orderStr].add(cat);
+    });
+
     const matchesKnownCategory = matchedCategories.length > 0;
     if (!matchesKnownCategory) {
       const key = tareaUp;
@@ -528,12 +537,74 @@ export function runAudit(
     }
   });
 
+  // Auditoría inversa: Repuestos cargados sin tarea asociada
+  Object.keys(matByOrder).forEach(orderStr => {
+    const mats = matByOrder[orderStr] || [];
+    const issuedMats = mats.filter(m => {
+      const v = parseFloat(String(m['Salidas']));
+      return !isNaN(v) && v > 0;
+    });
+    if (issuedMats.length === 0) return;
+
+    const taskCats = orderReplacementCats[orderStr] || new Set<string>();
+
+    issuedMats.forEach(m => {
+      const matDesc = String(m['Desc. Artículo'] || '');
+      const matDescUp = up(matDesc);
+
+      // Encontrar a qué categorías del diccionario corresponde el material
+      const matchedCatsByMat = Object.keys(activeParts).filter(cat => {
+        const synonyms = activeParts[cat] || [];
+        return synonyms.some(syn => matchMaterial(matDescUp, up(syn)));
+      });
+
+      // Si el material corresponde a alguna categoría auditada, pero ninguna de esas
+      // categorías está cubierta por las tareas de la orden
+      if (matchedCatsByMat.length > 0) {
+        const hasTask = matchedCatsByMat.some(cat => taskCats.has(cat));
+        if (!hasTask) {
+          // Obtener datos de la orden si existen
+          const ordData = ordByOrder[orderStr];
+          
+          // Buscar datos de equipo de las tareas si existen para esta orden
+          let eqCode = String(m['Equipo'] || '');
+          let eqName = String(m['Descripción'] || '');
+          if (!eqCode || !eqName) {
+            const taskRow = dfTar.find(t => String(t['Nro. Orden'] || t['DocNum'] || '') === orderStr);
+            if (taskRow) {
+              eqCode = eqCode || String(taskRow['Codigo equipo'] || '');
+              eqName = eqName || String(taskRow['Nombre Equipo'] || '');
+            }
+          }
+
+          results.push({
+            'Nro. Orden': orderStr,
+            'Equipo': eqCode,
+            'Nombre Equipo': eqName,
+            'Tarea': 'Sin tarea asociada',
+            'Estado Tarea': 'Sin tarea',
+            'Tipo de Hallazgo': '4) Repuesto sin Tarea registrada',
+            'Detalle': `Se retiró el material '${matDesc}' (${m['Salidas']} unidades) pero no existe ninguna tarea de recambio en la orden que requiera esta categoría (${matchedCatsByMat.join(', ')}).`,
+            ...(ordData ? {
+              'Tipo de orden': ordData.tipoOrden || undefined,
+              'Centros de costos': ordData.centrosCostos || undefined,
+              'Contabilizada': ordData.contabilizada || undefined,
+              'Fecha de la orden': ordData.fechaOrden || undefined,
+              'Status de documento': ordData.statusDoc || undefined,
+            } : {}),
+          });
+        }
+      }
+    });
+  });
+
   const unrecognizedTasks = Object.values(unrecognizedMap).sort((a, b) => b.count - a.count);
 
   // Calculate metrics
   const r1 = results.filter(r => r['Tipo de Hallazgo'].startsWith('1)'));
   const r2 = results.filter(r => r['Tipo de Hallazgo'].startsWith('2)'));
   const r3 = results.filter(r => r['Tipo de Hallazgo'].startsWith('3)'));
+  const r4 = results.filter(r => r['Tipo de Hallazgo'].startsWith('4)'));
 
   const calcBreakdown = (subset: AuditResult[], hasWarehouse: boolean): MetricBreakdown => {
     const uniqueOMs = [...new Set(subset.map(r => String(r['Nro. Orden'])))];
@@ -571,10 +642,11 @@ export function runAudit(
     unrecognizedTasks,
     matByOrder,
     metrics: {
-      c1: r1.length, c2: r2.length, c3: r3.length,
+      c1: r1.length, c2: r2.length, c3: r3.length, c4: r4.length,
       b1: calcBreakdown(r1, false),
       b2: calcBreakdown(r2, true),
       b3: calcBreakdown(r3, true),
+      b4: calcBreakdown(r4, true),
     },
   };
 }

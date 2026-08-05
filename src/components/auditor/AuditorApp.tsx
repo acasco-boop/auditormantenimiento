@@ -335,6 +335,7 @@ function HallazgoBadge({ tipo }: { tipo: string }) {
   let cls = 'bg-orange-500/15 text-orange-400 border-orange-500/30';
   if (tipo.startsWith('1)')) cls = 'bg-amber-500/15 text-amber-400 border-amber-500/25';
   else if (tipo.startsWith('3)')) cls = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25';
+  else if (tipo.startsWith('4)')) cls = 'bg-violet-500/15 text-violet-400 border-violet-500/25';
   return (
     <span className={`inline-flex items-center px-2.5 py-1 rounded-lg font-mono text-[10px] border ${cls}`}>
       {tipo}
@@ -503,7 +504,13 @@ export default function AuditorApp() {
 
   const results = auditOutput?.results || [];
   const unrecognizedTasks = auditOutput?.unrecognizedTasks || [];
-  const metrics = auditOutput?.metrics || { c1: 0, c2: 0, c3: 0, b1: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }, b3: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] } };
+  const metrics = auditOutput?.metrics || {
+    c1: 0, c2: 0, c3: 0, c4: 0,
+    b1: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
+    b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
+    b3: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
+    b4: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }
+  };
   const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
 
   const closingReport = React.useMemo(() => {
@@ -1382,7 +1389,7 @@ Lista de tareas:\n${listado}`;
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <MetricCard count={metrics.c1} label="Sin repuestos asignados" breakdown={metrics.b1} hasWarehouse={false}
                 icon={<AlertTriangle className="w-5 h-5 text-amber-400" />}
                 bgGlow="bg-gradient-to-br from-amber-950/50 via-amber-900/15 to-transparent"
@@ -1398,6 +1405,11 @@ Lista de tareas:\n${listado}`;
                 bgGlow="bg-gradient-to-br from-emerald-950/50 via-emerald-900/15 to-transparent"
                 barColor="bg-gradient-to-r from-emerald-500 to-teal-400" valueColor="text-emerald-400"
                 gradientBorder="gradient-border-emerald" delay="animate-fade-in-up-3" />
+              <MetricCard count={metrics.c4} label="Repuestos sin Tarea registrada" breakdown={metrics.b4} hasWarehouse={true}
+                icon={<ClipboardList className="w-5 h-5 text-violet-400" />}
+                bgGlow="bg-gradient-to-br from-violet-950/50 via-violet-900/15 to-transparent"
+                barColor="bg-gradient-to-r from-violet-500 to-violet-400" valueColor="text-violet-400"
+                gradientBorder="gradient-border-violet" delay="animate-fade-in-up-4" />
             </div>
 
             {/* Table */}
