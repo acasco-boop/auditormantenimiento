@@ -254,16 +254,16 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string, tareaUp?
       const cleanTaskContext = taskContextWords.filter(w => !phraseWordsSet.has(w));
       const cleanMatContext = matContextWords.filter(w => !phraseWordsSet.has(w));
 
-      if (cleanTaskContext.length > 0 && cleanMatContext.length > 0) {
-        const hasOverlap = cleanMatContext.some(mW => {
-          return cleanTaskContext.some(tW => {
+      if (cleanTaskContext.length > 0) {
+        const allWordsMatched = cleanTaskContext.every(tW => {
+          return cleanMatContext.some(mW => {
             if (mW === tW) return true;
             if (mW === tW + 'S' || mW === tW + 'ES') return true;
             return isFuzzyMatch(mW, tW);
           });
         });
         
-        if (!hasOverlap) {
+        if (!allWordsMatched) {
           return false;
         }
       }
@@ -285,6 +285,13 @@ export function getMatchingCategories(tareaUp: string, activeParts: Record<strin
   const matches: string[] = [];
   const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA', 'Y', 'O', 'LA', 'EL', 'EN', 'UN', 'AL', 'DI', 'SU']);
   const actionWords = ACTION_WORDS;
+  
+  const actionType = getActionType(tareaUp);
+  if (actionType === 'LUBRICACION') {
+    LUBRICANT_CATEGORIES.forEach(cat => {
+      if (!matches.includes(cat)) matches.push(cat);
+    });
+  }
   
   const isValidSynonym = (syn: string) => {
     const s = syn.trim();
