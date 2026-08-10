@@ -782,7 +782,7 @@ Lista de tareas:\n${listado}`;
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Auditoría');
     const cols = [
       'Nro. Orden', 'Tipo de orden', 'Centros de costos', 
-      'Contabilizada', 'Fecha de la orden', 'Status de documento', 
+      'Estado Orden', 'Contabilizada', 'Fecha de la orden', 'Status de documento', 
       'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 
       'Tipo de Hallazgo', 'Detalle'
     ];
@@ -794,6 +794,7 @@ Lista de tareas:\n${listado}`;
     const centerAlignCols = [
       cols.indexOf('Nro. Orden') + 1,
       cols.indexOf('Tipo de orden') + 1,
+      cols.indexOf('Estado Orden') + 1,
       cols.indexOf('Contabilizada') + 1,
       cols.indexOf('Fecha de la orden') + 1,
       cols.indexOf('Status de documento') + 1,
@@ -1428,9 +1429,10 @@ Lista de tareas:\n${listado}`;
                 <Table>
                   <TableHeader>
                     <TableRow className="border-white/[0.04] hover:bg-transparent">
-                      {['Nro. Orden', 'Tipo OM', 'C.Costos', 'Contab.', 'Fecha Orden', 'Estado Doc', 'Equipo', 'Tarea', 'Tipo', 'Detalle'].map((h, i) => {
+                      {['Nro. Orden', 'Tipo OM', 'C.Costos', 'Estado Orden', 'Contab.', 'Fecha Orden', 'Estado Doc', 'Equipo', 'Tarea', 'Tipo', 'Detalle'].map((h, i) => {
                         let visibilityClass = "";
                         if (h === 'Tipo OM') visibilityClass = "hidden lg:table-cell";
+                        else if (h === 'Estado Orden') visibilityClass = "hidden xl:table-cell";
                         else if (h === 'Contab.') visibilityClass = "hidden xl:table-cell";
                         else if (h === 'Fecha Orden') visibilityClass = "hidden xl:table-cell";
                         else if (h === 'Estado Doc') visibilityClass = "hidden xl:table-cell";
@@ -1452,6 +1454,11 @@ Lista de tareas:\n${listado}`;
                           ) : <span className="text-slate-600 text-xs">—</span>}
                         </TableCell>
                         <TableCell className="font-mono text-xs text-teal-300/80">{esc(r['Centros de costos']) || <span className="text-slate-600">—</span>}</TableCell>
+                        
+                        {/* Estado Orden */}
+                        <TableCell className="text-xs hidden xl:table-cell">
+                          <span className="text-slate-300">{esc(r['Estado Orden']) || <span className="text-slate-600">—</span>}</span>
+                        </TableCell>
                         
                         {/* Contabilizada */}
                         <TableCell className="text-xs hidden xl:table-cell">

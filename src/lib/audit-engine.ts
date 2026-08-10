@@ -115,6 +115,12 @@ export function getActionType(tareaUp: string): ActionType | null {
 export function explicitReplacementNeeded(tareaUp: string): boolean {
   if (!tareaUp) return false;
 
+  // Si se menciona que la pieza fue "REPARADA" o "REPARADO", generalmente es una 
+  // reinstalación de la misma pieza y no consume un repuesto nuevo del pañol.
+  if (tareaUp.includes('REPARADO') || tareaUp.includes('REPARADA') || tareaUp.includes('REACONDICIONADO') || tareaUp.includes('REACONDICIONADA')) {
+    return false;
+  }
+
   // 1. Si contiene palabras de control, regulación, ajuste o mantenimiento,
   // pero NO contiene verbos explícitos de cambio/colocación.
   // Quitamos LUBRICAR, LUBRICACION, ENGRASE, ENGRASAR porque son tareas que consumen insumos reales (aceite/grasa)
@@ -192,8 +198,8 @@ export function isFuzzyMatch(word1: string, word2: string): boolean {
   if (Math.abs(len1 - len2) > 2) return false;
   
   const dist = levenshtein(word1, word2);
-  if (dist === 1) return true;
-  if (dist === 2 && Math.max(len1, len2) >= 5) return true; // Reducido a 5 para tolerar transposiciones en palabras cortas como REALY -> RELAY
+  if (dist === 1 && Math.max(len1, len2) >= 4) return true;
+  if (dist === 2 && Math.max(len1, len2) >= 7) return true; 
   return false;
 }
 
@@ -250,9 +256,28 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string, tareaUp?
 
       const matContextWords = matWords.filter(w => CONTEXT_WORDS.has(w));
 
+      // Find the category this synonym belongs to, so we can ignore all its synonyms as context words
+      let matchedCat = '';
+      for (const cat in activeParts) {
+        if (cat === synonymPhrase || (activeParts[cat] && activeParts[cat].includes(synonymPhrase))) {
+          matchedCat = cat;
+          break;
+        }
+      }
+
+      const categorySynonyms = new Set<string>();
+      if (matchedCat) {
+        categorySynonyms.add(matchedCat);
+        (activeParts[matchedCat] || []).forEach(s => {
+          s.split(/[^A-Z0-9]/).forEach(w => {
+            if (w.trim()) categorySynonyms.add(w.trim());
+          });
+        });
+      }
+
       const phraseWordsSet = new Set(phraseWords);
-      const cleanTaskContext = taskContextWords.filter(w => !phraseWordsSet.has(w));
-      const cleanMatContext = matContextWords.filter(w => !phraseWordsSet.has(w));
+      const cleanTaskContext = taskContextWords.filter(w => !phraseWordsSet.has(w) && !categorySynonyms.has(w));
+      const cleanMatContext = matContextWords.filter(w => !phraseWordsSet.has(w) && !categorySynonyms.has(w));
 
       if (cleanTaskContext.length > 0) {
         const allWordsMatched = cleanTaskContext.every(tW => {
@@ -439,10 +464,11 @@ export function runAudit(
     matByOrder[key].push(r);
   });
 
-  // Órdenes indexadas por Nro. orden → { tipoOrden, centrosCostos, contabilizada, fechaOrden, statusDoc }
+  // Órdenes indexadas por Nro. orden → { tipoOrden, centrosCostos, estadoOrden, contabilizada, fechaOrden, statusDoc }
   const ordByOrder: Record<string, {
     tipoOrden: string;
     centrosCostos: string;
+    estadoOrden: string;
     contabilizada: string;
     fechaOrden: string;
     statusDoc: string;
@@ -455,6 +481,7 @@ export function runAudit(
         ordByOrder[key] = {
           tipoOrden: String(r['Tipo de orden'] || '').trim(),
           centrosCostos: String(r['Centos de costos'] || '').trim(),
+          estadoOrden: String(r['Estado'] || '').trim(),
           contabilizada: String(r['Contabilizada'] || '').trim(),
           fechaOrden: formatDate(r['Fecha de la orden']),
           statusDoc: String(r['Status de documento'] || '').trim(),
@@ -476,8 +503,15 @@ export function runAudit(
 
     const order = row['Nro. Orden']!;
 
-    const matchedCategories = getMatchingCategories(tareaUp, activeParts);
     const orderStr = String(order);
+    const ordData = ordByOrder[orderStr];
+
+    if (ordData) {
+      if (ordData.contabilizada.toUpperCase() === 'SI') return;
+      if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+    }
+
+    const matchedCategories = getMatchingCategories(tareaUp, activeParts);
     if (!orderReplacementCats[orderStr]) {
       orderReplacementCats[orderStr] = new Set();
     }
@@ -492,14 +526,13 @@ export function runAudit(
       unrecognizedMap[key].count++;
     }
 
-    const mats = matByOrder[String(order)] || [];
+    const mats = matByOrder[orderStr] || [];
     const matList = mats.filter(m => !isInsumoOFerreteria(up(m['Desc. Artículo'] || ''))).map(m => up(m['Desc. Artículo']));
     const totalSalidas = mats.reduce((acc, m) => {
       const v = parseFloat(String(m['Salidas']));
       return acc + (isNaN(v) ? 0 : v);
     }, 0);
 
-    const ordData = ordByOrder[String(order)];
     const base: AuditResult = {
       'Nro. Orden': order,
       'Equipo': String(row['Codigo equipo'] || ''),
@@ -511,6 +544,7 @@ export function runAudit(
       ...(ordData ? {
         'Tipo de orden': ordData.tipoOrden || undefined,
         'Centros de costos': ordData.centrosCostos || undefined,
+        'Estado Orden': ordData.estadoOrden || undefined,
         'Contabilizada': ordData.contabilizada || undefined,
         'Fecha de la orden': ordData.fechaOrden || undefined,
         'Status de documento': ordData.statusDoc || undefined,
@@ -563,6 +597,12 @@ export function runAudit(
 
   // Auditoría inversa: Repuestos cargados sin tarea asociada
   Object.keys(matByOrder).forEach(orderStr => {
+    const ordData = ordByOrder[orderStr];
+    if (ordData) {
+      if (ordData.contabilizada.toUpperCase() === 'SI') return;
+      if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+    }
+
     const mats = matByOrder[orderStr] || [];
     const issuedMats = mats.filter(m => {
       const v = parseFloat(String(m['Salidas']));
@@ -588,9 +628,6 @@ export function runAudit(
       if (matchedCatsByMat.length > 0) {
         const hasTask = matchedCatsByMat.some(cat => taskCats.has(cat));
         if (!hasTask) {
-          // Obtener datos de la orden si existen
-          const ordData = ordByOrder[orderStr];
-          
           // Buscar datos de equipo de las tareas si existen para esta orden
           let eqCode = String(m['Equipo'] || '');
           let eqName = String(m['Descripción'] || '');
@@ -608,11 +645,12 @@ export function runAudit(
             'Nombre Equipo': eqName,
             'Tarea': 'Sin tarea asociada',
             'Estado Tarea': 'Sin tarea',
-            'Tipo de Hallazgo': '4) Repuesto sin Tarea registrada',
-            'Detalle': `Se retiró el material '${matDesc}' (${m['Salidas']} unidades) pero no existe ninguna tarea de recambio en la orden que requiera esta categoría (${matchedCatsByMat.join(', ')}).`,
+            'Tipo de Hallazgo': `4) Repuesto sin tarea asociada`,
+            'Detalle': `Se retiró el material "${matDesc}" (${m['Salidas']} unidades) pero no existe ninguna tarea de recambio en la orden que requiera esta categoría (${matchedCatsByMat.join(', ')}).`,
             ...(ordData ? {
               'Tipo de orden': ordData.tipoOrden || undefined,
               'Centros de costos': ordData.centrosCostos || undefined,
+              'Estado Orden': ordData.estadoOrden || undefined,
               'Contabilizada': ordData.contabilizada || undefined,
               'Fecha de la orden': ordData.fechaOrden || undefined,
               'Status de documento': ordData.statusDoc || undefined,
@@ -622,6 +660,7 @@ export function runAudit(
       }
     });
   });
+
 
   const unrecognizedTasks = Object.values(unrecognizedMap).sort((a, b) => b.count - a.count);
 
