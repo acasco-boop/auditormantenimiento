@@ -717,6 +717,9 @@ export function runAudit(
           'Fecha de la orden': ordData.fechaOrden || undefined,
           'Status de documento': ordData.statusDoc || undefined,
         } : {}),
+      });
+    }
+  });
   
   const unrecognizedTasks = Object.values(unrecognizedMap).sort((a, b) => b.count - a.count);
 
