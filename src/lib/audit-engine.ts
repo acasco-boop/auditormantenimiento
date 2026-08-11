@@ -439,8 +439,8 @@ export interface AuditOutput {
   unrecognizedTasks: UnrecognizedTask[];
   matByOrder: Record<string, MaterialRow[]>;
   metrics: {
-    c1: number; c2: number; c3: number; c4: number;
-    b1: MetricBreakdown; b2: MetricBreakdown; b3: MetricBreakdown; b4: MetricBreakdown;
+    c1: number; c2: number; c3: number; c4: number; c5: number;
+    b1: MetricBreakdown; b2: MetricBreakdown; b3: MetricBreakdown; b4: MetricBreakdown; b5: MetricBreakdown;
   };
 }
 
@@ -661,7 +661,63 @@ export function runAudit(
     });
   });
 
+  // Auditoría: Materiales Repetidos
+  Object.keys(matByOrder).forEach(orderStr => {
+    const ordData = ordByOrder[orderStr];
+    if (ordData) {
+      if (ordData.contabilizada.toUpperCase() === 'SI') return;
+      if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+    }
 
+    const mats = matByOrder[orderStr] || [];
+    const relevantMats = mats.filter(m => {
+      const matDescUp = up(String(m['Desc. Artículo'] || ''));
+      return matDescUp && !isInsumoOFerreteria(matDescUp);
+    });
+
+    const descCounts: Record<string, number> = {};
+    relevantMats.forEach(m => {
+      const desc = up(String(m['Desc. Artículo'] || ''));
+      descCounts[desc] = (descCounts[desc] || 0) + 1;
+    });
+
+    const duplicates = Object.keys(descCounts).filter(desc => descCounts[desc] > 1);
+
+    if (duplicates.length > 0) {
+      const dupDetails = duplicates.map(desc => `'${desc}' (${descCounts[desc]} veces)`).join(', ');
+      
+      let eqCode = '';
+      let eqName = '';
+      const m = mats[0];
+      if (m) {
+         eqCode = String(m['Equipo'] || '');
+         eqName = String(m['Descripción'] || '');
+      }
+      if (!eqCode || !eqName) {
+        const taskRow = dfTar.find(t => String(t['Nro. Orden'] || t['DocNum'] || '') === orderStr);
+        if (taskRow) {
+          eqCode = eqCode || String(taskRow['Codigo equipo'] || '');
+          eqName = eqName || String(taskRow['Nombre Equipo'] || '');
+        }
+      }
+
+      results.push({
+        'Nro. Orden': orderStr,
+        'Equipo': eqCode,
+        'Nombre Equipo': eqName,
+        'Tarea': 'Múltiples repuestos',
+        'Estado Tarea': 'Revisión',
+        'Tipo de Hallazgo': '5) Materiales Repetidos',
+        'Detalle': `Se cargó el mismo repuesto varias veces en la orden: ${dupDetails}. Revisar posibles duplicados.`,
+        ...(ordData ? {
+          'Tipo de orden': ordData.tipoOrden || undefined,
+          'Centros de costos': ordData.centrosCostos || undefined,
+          'Estado Orden': ordData.estadoOrden || undefined,
+          'Contabilizada': ordData.contabilizada || undefined,
+          'Fecha de la orden': ordData.fechaOrden || undefined,
+          'Status de documento': ordData.statusDoc || undefined,
+        } : {}),
+  
   const unrecognizedTasks = Object.values(unrecognizedMap).sort((a, b) => b.count - a.count);
 
   // Calculate metrics
@@ -669,6 +725,7 @@ export function runAudit(
   const r2 = results.filter(r => r['Tipo de Hallazgo'].startsWith('2)'));
   const r3 = results.filter(r => r['Tipo de Hallazgo'].startsWith('3)'));
   const r4 = results.filter(r => r['Tipo de Hallazgo'].startsWith('4)'));
+  const r5 = results.filter(r => r['Tipo de Hallazgo'].startsWith('5)'));
 
   const calcBreakdown = (subset: AuditResult[], hasWarehouse: boolean): MetricBreakdown => {
     const uniqueOMs = [...new Set(subset.map(r => String(r['Nro. Orden'])))];
@@ -706,11 +763,12 @@ export function runAudit(
     unrecognizedTasks,
     matByOrder,
     metrics: {
-      c1: r1.length, c2: r2.length, c3: r3.length, c4: r4.length,
+      c1: r1.length, c2: r2.length, c3: r3.length, c4: r4.length, c5: r5.length,
       b1: calcBreakdown(r1, false),
       b2: calcBreakdown(r2, true),
       b3: calcBreakdown(r3, true),
       b4: calcBreakdown(r4, true),
-    },
+      b5: calcBreakdown(r5, true),
+    }
   };
 }

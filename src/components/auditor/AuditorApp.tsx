@@ -1411,6 +1411,11 @@ Lista de tareas:\n${listado}`;
                 bgGlow="bg-gradient-to-br from-violet-950/50 via-violet-900/15 to-transparent"
                 barColor="bg-gradient-to-r from-violet-500 to-violet-400" valueColor="text-violet-400"
                 gradientBorder="gradient-border-violet" delay="animate-fade-in-up-4" />
+              <MetricCard count={metrics.c5} label="Materiales Repetidos" breakdown={metrics.b5} hasWarehouse={true}
+                icon={<AlertTriangle className="w-5 h-5 text-rose-400" />}
+                bgGlow="bg-gradient-to-br from-rose-950/50 via-rose-900/15 to-transparent"
+                barColor="bg-gradient-to-r from-rose-500 to-rose-400" valueColor="text-rose-400"
+                gradientBorder="gradient-border-rose" delay="animate-fade-in-up-5" />
             </div>
 
             {/* Table */}
