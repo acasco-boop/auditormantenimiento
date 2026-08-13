@@ -24,7 +24,7 @@ import {
   Settings, Eye, EyeOff
 } from 'lucide-react';
 import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
-import { runAudit, up, ACTION_WORDS, explicitReplacementNeeded } from '@/lib/audit-engine';
+import { runAudit, up, ACTION_WORDS, explicitReplacementNeeded, isInsumoOFerreteria } from '@/lib/audit-engine';
 import { runAIAudit } from '@/lib/ai-audit';
 import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
 import { requestOMCoherence, type CoherenceCheckResult } from '@/lib/ai-coherence';
@@ -511,7 +511,24 @@ export default function AuditorApp() {
 
   useEffect(() => {
     if (!auditOutput) return;
-    if (!auditOutput.pendingAIReview || auditOutput.pendingAIReview.length === 0) {
+    
+    // Calcular órdenes a auditar: las que tienen pendingAIReview + las que tienen materiales válidos
+    const omsToAudit = new Set<string>();
+    (auditOutput.pendingAIReview || []).forEach(t => omsToAudit.add(t.orderStr));
+    
+    Object.entries(auditOutput.matByOrder || {}).forEach(([om, mats]) => {
+      const hasValidMat = mats.some(m => {
+        const desc = up(String(m['Desc. Artículo'] || ''));
+        const salidas = parseFloat(String(m['Salidas'] || '0'));
+        return desc && !isNaN(salidas) && salidas > 0 && 
+          !isInsumoOFerreteria(desc);
+      });
+      if (hasValidMat) omsToAudit.add(om);
+    });
+
+    const ordersToAudit = Array.from(omsToAudit);
+
+    if (ordersToAudit.length === 0) {
       setAiAuditResults([]);
       return;
     }
@@ -523,7 +540,8 @@ export default function AuditorApp() {
       setIsAiAuditing(true);
       try {
         const newResults = await runAIAudit({
-          pendingTasks: auditOutput.pendingAIReview,
+          pendingTasks: auditOutput.pendingAIReview || [],
+          ordersToAudit,
           matByOrder: auditOutput.matByOrder,
           dfTar: dfTar || [],
           aiConfig: { apiKey: activeApiKey, model: activeModel, provider: aiProvider, baseUrl: activeBaseUrl },

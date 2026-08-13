@@ -176,15 +176,15 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function runAIAudit(params: {
   pendingTasks: PendingAITask[];
+  ordersToAudit: string[];
   matByOrder: Record<string, MaterialRow[]>;
   dfTar: { 'Nro. Orden'?: string | number | null; 'Tarea'?: string | null; 'Estado'?: string | null; 'Codigo equipo'?: string | null; 'Nombre Equipo'?: string | null; [key: string]: unknown }[];
   aiConfig: AIConfig;
   onProgress?: (current: number, total: number, om: string) => void;
 }): Promise<AuditResult[]> {
-  const { pendingTasks, matByOrder, dfTar, aiConfig, onProgress } = params;
-
-  const omSet = new Set(pendingTasks.map(pt => pt.orderStr));
-  const uniqueOms = Array.from(omSet);
+  const { pendingTasks, ordersToAudit, matByOrder, dfTar, aiConfig, onProgress } = params;
+  
+  const uniqueOms = ordersToAudit;
   const auditResults: AuditResult[] = [];
 
   const pendingByOM = new Map<string, PendingAITask[]>();
@@ -211,6 +211,7 @@ export async function runAIAudit(params: {
       });
 
       const pendingForOM = pendingByOM.get(omStr) || [];
+      // If we don't have pending tasks for this OM, we can't get ordData from them, but we can just use empty
       const firstPending = pendingForOM[0];
       const ordData = firstPending?.ordData;
 
