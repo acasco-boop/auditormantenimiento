@@ -680,7 +680,7 @@ export function runAudit(
       return;
     }
 
-    // Verificar cada material contra las tareas de la orden
+    // Obtener tareas que requieren material
     const tasksRequiringMaterial = orderTasks.filter(t => {
       const tarea = String(t['Tarea'] || '');
       const tareaUp = up(tarea);
@@ -713,7 +713,61 @@ export function runAudit(
           } : {}),
         });
       });
+      return;
     }
+
+    // NUEVA LÓGICA: Verificar cada material contra las tareas de la orden
+    // Para cada material, verificar si hay alguna tarea que lo justifique
+    relevantMats.forEach(m => {
+      const matDescUp = up(String(m['Desc. Artículo'] || ''));
+      const salidas = parseFloat(String(m['Salidas'] || '0'));
+      
+      // Verificar si este material está justificado por alguna tarea
+      const isJustified = tasksRequiringMaterial.some(t => {
+        const tarea = String(t['Tarea'] || '');
+        const tareaUp = up(tarea);
+        
+        // Obtener las categorías que coinciden con esta tarea
+        const matchedCategories = getMatchingCategories(tareaUp, activeParts);
+        
+        // Verificar si el material coincide con alguna categoría de la tarea
+        return matchedCategories.some(cat => {
+          // Obtener los sinónimos de esta categoría
+          const synonyms = activeParts[cat] || [];
+          const allSynonyms = [cat, ...synonyms];
+          
+          // Verificar si el material coincide con algún sinónimo
+          return allSynonyms.some(syn => {
+            const synUp = up(syn);
+            return matchMaterial(matDescUp, synUp, tareaUp, activeParts);
+          });
+        });
+      });
+      
+      // Si el material no está justificado por ninguna tarea, marcarlo como huérfano
+      if (!isJustified) {
+        const eqCode = String(m['Equipo'] || '');
+        const eqName = String(m['Descripción'] || '');
+        
+        results.push({
+          'Nro. Orden': orderStr,
+          'Equipo': eqCode,
+          'Nombre Equipo': eqName,
+          'Tarea': 'Sin tarea asociada',
+          'Estado Tarea': 'N/A',
+          'Tipo de Hallazgo': '4) Repuesto sin tarea (IA)',
+          'Detalle': `Material "${String(m['Desc. Artículo'] || '')}" (Salidas: ${salidas}) no coincide con ninguna tarea de la orden`,
+          ...(ordData ? {
+            'Tipo de orden': ordData.tipoOrden || undefined,
+            'Centros de costos': ordData.centrosCostos || undefined,
+            'Estado Orden': ordData.estadoOrden || undefined,
+            'Contabilizada': ordData.contabilizada || undefined,
+            'Fecha de la orden': ordData.fechaOrden || undefined,
+            'Status de documento': ordData.statusDoc || undefined,
+          } : {}),
+        });
+      }
+    });
   });
   
   const unrecognizedTasks = Object.values(unrecognizedMap).sort((a, b) => b.count - a.count);
