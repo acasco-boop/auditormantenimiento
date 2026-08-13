@@ -224,20 +224,25 @@ export async function runAIAudit(params: {
         'Status de documento': ordData.statusDoc || undefined,
       } : {};
 
-      for (const pt of pendingForOM) {
-        const tv = iaRes.tareas.find((t: AITaskVerdict) =>
-          t.tarea.toUpperCase().trim() === pt.tarea.toUpperCase().trim()
-        );
-
+      // Procesar TODAS las tareas analizadas por la IA, no solo las pendientes
+      for (const tv of iaRes.tareas) {
         const conf = parseFloat(String(tv?.confianza || '1'));
-        if (tv && tv.resultado === 'FALTA MATERIAL' && conf >= 0.60) {
+        if (tv.resultado === 'FALTA MATERIAL' && conf >= 0.60) {
+          // Buscar datos de la tarea original
+          const originalTask = ordTasks.find(t => 
+            String(t['Tarea'] || '').toUpperCase().trim() === tv.tarea.toUpperCase().trim()
+          );
+          const pendingTask = pendingForOM.find(pt => 
+            pt.tarea.toUpperCase().trim() === tv.tarea.toUpperCase().trim()
+          );
+          
           const isHighConf = conf >= 0.85;
           auditResults.push({
             'Nro. Orden': omStr,
-            'Equipo': pt.equipo,
-            'Nombre Equipo': pt.nombreEquipo,
-            'Tarea': pt.tarea,
-            'Estado Tarea': pt.estadoTarea,
+            'Equipo': pendingTask?.equipo || equipo,
+            'Nombre Equipo': pendingTask?.nombreEquipo || modelo,
+            'Tarea': tv.tarea,
+            'Estado Tarea': pendingTask?.estadoTarea || String(originalTask?.['Estado'] || ''),
             'Tipo de Hallazgo': isHighConf ? '2) Falta material (IA)' : '2) Posible falta de material (IA - revisar)',
             'Detalle': tv.justificacion || `Acción: ${tv.accion || '?'}, Objeto: ${tv.objeto_principal || '?'}`,
             'Resultado IA': tv.resultado,

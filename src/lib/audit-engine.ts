@@ -121,52 +121,52 @@ export function explicitReplacementNeeded(tareaUp: string): boolean {
     return false;
   }
 
-  // 1. Si contiene palabras de control, regulación, ajuste o mantenimiento,
-  // pero NO contiene verbos explícitos de cambio/colocación.
-  // Quitamos LUBRICAR, LUBRICACION, ENGRASE, ENGRASAR porque son tareas que consumen insumos reales (aceite/grasa)
+  // 1. Detectar si tiene verbos de acción explícitos PRIMERO (antes de filtrar por control)
+  const explicitActions = [
+    'CAMBIAR', 'COLOCAR', 'INSTALAR', 'REEMPLAZAR', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN',
+    'AGREGAR', 'AGREGO', 'AGREGADO', 'RELLENAR', 'RELLENO', 'ENGRASE', 'ENGRASAR', 'LUBRICAR'
+  ];
+  const hasExplicitAction = explicitActions.some(k => tareaUp.includes(k));
+  const hasActiveCambio = tareaUp.includes('CAMBIO') && !tareaUp.includes('DE CAMBIO') && !tareaUp.includes('DE CAMBIOS');
+  const hasActiveColoco = tareaUp.includes('COLOCO') && !tareaUp.includes('DE COLOCO');
+  const hasActiveAgregar = tareaUp.includes('AGREGO') || tareaUp.includes('AGREGA');
+  const hasActionWord = hasExplicitAction || hasActiveCambio || hasActiveColoco || hasActiveAgregar;
+
+  // 2. Si tiene verbo de acción explícito, SIEMPRE necesita material (sin importar verbos de control)
+  if (hasActionWord) {
+    // Doble verificación: si la acción detectada es REEMPLAZO debido a la palabra CAMBIO/CAMBIOS
+    // pero todas las apariciones de CAMBIO/CAMBIOS están precedidas por "DE", entonces lo ignoramos.
+    const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
+    const hasCambio = words.includes('CAMBIO') || words.includes('CAMBIOS');
+    if (hasCambio) {
+      const hasOnlyNounCambios = words.every((word, idx) => {
+        if (word === 'CAMBIO' || word === 'CAMBIOS') {
+          return idx > 0 && words[idx - 1] === 'DE';
+        }
+        return true;
+      });
+
+      if (hasOnlyNounCambios && !explicitActions.some(k => tareaUp.includes(k)) && !tareaUp.includes('COLOCO')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // 3. Si solo tiene verbos de control (sin acción explícita), no necesita material
   const controlVerbs = [
     'CONTROLAR', 'CONTROL', 'REVISAR', 'REVISION', 'CHEQUEAR', 'CHEQUEO',
     'REGULAR', 'REGULACION', 'AJUSTAR', 'AJUSTE', 'LIMPIAR', 'LIMPIEZA',
     'SOLDAR', 'REFORZAR', 'REPARAR', 'REPARACION', 'MEDIR', 'MEDICION'
   ];
-
   const hasControlVerb = controlVerbs.some(k => tareaUp.includes(k));
-
-  const explicitActions = [
-    'CAMBIAR', 'COLOCAR', 'INSTALAR', 'REEMPLAZAR', 'COLCAR', 'COLOCADO', 'COLOCAN', 'CAMBIAN'
-  ];
-
   if (hasControlVerb) {
-    const hasExplicitAction = explicitActions.some(k => tareaUp.includes(k));
-    const hasActiveCambio = tareaUp.includes('CAMBIO') && !tareaUp.includes('DE CAMBIO') && !tareaUp.includes('DE CAMBIOS');
-    const hasActiveColoco = tareaUp.includes('COLOCO') && !tareaUp.includes('DE COLOCO');
-    
-    if (!hasExplicitAction && !hasActiveCambio && !hasActiveColoco) {
-      return false;
-    }
+    return false;
   }
 
-  // 2. Si no tiene verbos de control o pasó el filtro, validamos si tiene un tipo de acción válido,
-  // descartando "CAMBIO/CAMBIOS" cuando vienen precedidos por "DE" (sustantivo de caja/palanca de cambios)
+  // 4. Validar si tiene un tipo de acción válido
   const actionType = getActionType(tareaUp);
   if (actionType === null) return false;
-
-  // Doble verificación: si la acción detectada es REEMPLAZO debido a la palabra CAMBIO/CAMBIOS
-  // pero todas las apariciones de CAMBIO/CAMBIOS están precedidas por "DE", entonces lo ignoramos.
-  const words = tareaUp.split(/[^A-Z]/).map(w => w.trim()).filter(Boolean);
-  const hasCambio = words.includes('CAMBIO') || words.includes('CAMBIOS');
-  if (hasCambio) {
-    const hasOnlyNounCambios = words.every((word, idx) => {
-      if (word === 'CAMBIO' || word === 'CAMBIOS') {
-        return idx > 0 && words[idx - 1] === 'DE';
-      }
-      return true;
-    });
-
-    if (hasOnlyNounCambios && !explicitActions.some(k => tareaUp.includes(k)) && !tareaUp.includes('COLOCO')) {
-      return false;
-    }
-  }
 
   return true;
 }
@@ -628,12 +628,100 @@ export function runAudit(
       });
     }
   });
+
+  // Auditoría: Materiales sin tarea (materiales huérfanos a nivel local)
+  // Para cada orden con materiales, verificar si hay materiales que no coinciden
+  // con ninguna tarea de la orden
+  Object.keys(matByOrder).forEach(orderStr => {
+    const ordData = ordByOrder[orderStr];
+    if (ordData) {
+      if (ordData.contabilizada.toUpperCase() === 'SI') return;
+      if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+    }
+
+    const mats = matByOrder[orderStr] || [];
+    const relevantMats = mats.filter(m => {
+      const matDescUp = up(String(m['Desc. Artículo'] || ''));
+      const salidas = parseFloat(String(m['Salidas'] || '0'));
+      return matDescUp && !isInsumoOFerreteria(matDescUp) && salidas > 0;
+    });
+
+    if (relevantMats.length === 0) return;
+
+    // Obtener todas las tareas de esta orden
+    const orderTasks = dfTar.filter(t => String(t['Nro. Orden'] || t['DocNum'] || '') === orderStr);
+    
+    // Si no hay tareas, todos los materiales son huérfanos
+    if (orderTasks.length === 0) {
+      relevantMats.forEach(m => {
+        const eqCode = String(m['Equipo'] || '');
+        const eqName = String(m['Descripción'] || '');
+        const desc = String(m['Desc. Artículo'] || '');
+        const salidas = parseFloat(String(m['Salidas'] || '0'));
+
+        results.push({
+          'Nro. Orden': orderStr,
+          'Equipo': eqCode,
+          'Nombre Equipo': eqName,
+          'Tarea': 'Sin tarea asociada',
+          'Estado Tarea': 'Sin tarea',
+          'Tipo de Hallazgo': '4) Repuesto sin tarea (IA)',
+          'Detalle': `Material "${desc}" (Salidas: ${salidas}) sin ninguna tarea que lo justifique`,
+          ...(ordData ? {
+            'Tipo de orden': ordData.tipoOrden || undefined,
+            'Centros de costos': ordData.centrosCostos || undefined,
+            'Estado Orden': ordData.estadoOrden || undefined,
+            'Contabilizada': ordData.contabilizada || undefined,
+            'Fecha de la orden': ordData.fechaOrden || undefined,
+            'Status de documento': ordData.statusDoc || undefined,
+          } : {}),
+        });
+      });
+      return;
+    }
+
+    // Verificar cada material contra las tareas de la orden
+    const tasksRequiringMaterial = orderTasks.filter(t => {
+      const tarea = String(t['Tarea'] || '');
+      const tareaUp = up(tarea);
+      return explicitReplacementNeeded(tareaUp);
+    });
+
+    // Si no hay tareas que requieran material, todos los materiales son huérfanos
+    if (tasksRequiringMaterial.length === 0) {
+      relevantMats.forEach(m => {
+        const eqCode = String(m['Equipo'] || '');
+        const eqName = String(m['Descripción'] || '');
+        const desc = String(m['Desc. Artículo'] || '');
+        const salidas = parseFloat(String(m['Salidas'] || '0'));
+
+        results.push({
+          'Nro. Orden': orderStr,
+          'Equipo': eqCode,
+          'Nombre Equipo': eqName,
+          'Tarea': 'Sin tarea que requiera material',
+          'Estado Tarea': 'N/A',
+          'Tipo de Hallazgo': '4) Repuesto sin tarea (IA)',
+          'Detalle': `Material "${desc}" (Salidas: ${salidas}) cargado pero ninguna tarea requiere material`,
+          ...(ordData ? {
+            'Tipo de orden': ordData.tipoOrden || undefined,
+            'Centros de costos': ordData.centrosCostos || undefined,
+            'Estado Orden': ordData.estadoOrden || undefined,
+            'Contabilizada': ordData.contabilizada || undefined,
+            'Fecha de la orden': ordData.fechaOrden || undefined,
+            'Status de documento': ordData.statusDoc || undefined,
+          } : {}),
+        });
+      });
+    }
+  });
   
   const unrecognizedTasks = Object.values(unrecognizedMap).sort((a, b) => b.count - a.count);
 
   // Calculate metrics
   const r1 = results.filter(r => r['Tipo de Hallazgo'].startsWith('1)'));
   const r3 = results.filter(r => r['Tipo de Hallazgo'].startsWith('3)'));
+  const r4 = results.filter(r => r['Tipo de Hallazgo'].startsWith('4)'));
   const r5 = results.filter(r => r['Tipo de Hallazgo'].startsWith('5)'));
 
   const calcBreakdown = (subset: AuditResult[], hasWarehouse: boolean): MetricBreakdown => {
@@ -673,11 +761,11 @@ export function runAudit(
     matByOrder,
     pendingAIReview,
     metrics: {
-      c1: r1.length, c2: 0, c3: r3.length, c4: 0, c5: r5.length,
+      c1: r1.length, c2: 0, c3: r3.length, c4: r4.length, c5: r5.length,
       b1: calcBreakdown(r1, false),
       b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
       b3: calcBreakdown(r3, true),
-      b4: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
+      b4: calcBreakdown(r4, true),
       b5: calcBreakdown(r5, true),
     }
   };
