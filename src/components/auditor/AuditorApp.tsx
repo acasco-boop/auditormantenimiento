@@ -24,7 +24,7 @@ import {
   Settings, Eye, EyeOff
 } from 'lucide-react';
 import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
-import { runAudit, up, ACTION_WORDS, explicitReplacementNeeded, isInsumoOFerreteria } from '@/lib/audit-engine';
+import { runAudit, up, ACTION_WORDS, explicitReplacementNeeded, isInsumoOFerreteria, shouldExcludeOrderType } from '@/lib/audit-engine';
 import { runAIAudit } from '@/lib/ai-audit';
 import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
 import { requestOMCoherence, type CoherenceCheckResult } from '@/lib/ai-coherence';
@@ -512,11 +512,23 @@ export default function AuditorApp() {
   useEffect(() => {
     if (!auditOutput) return;
     
+    // Construir mapa de tipo de orden para filtrar Diagnóstico/Tercero
+    const orderTypeMap: Record<string, string> = {};
+    if (dfOrd && dfOrd.length > 0) {
+      dfOrd.forEach(r => {
+        const key = String(r['Nro. orden'] ?? '');
+        if (key) orderTypeMap[key] = String(r['Tipo de orden'] || '').trim();
+      });
+    }
+
     // Calcular órdenes a auditar: las que tienen pendingAIReview + las que tienen materiales válidos
     const omsToAudit = new Set<string>();
     (auditOutput.pendingAIReview || []).forEach(t => omsToAudit.add(t.orderStr));
     
     Object.entries(auditOutput.matByOrder || {}).forEach(([om, mats]) => {
+      // Excluir tipos de orden Diagnóstico y Tercero
+      if (orderTypeMap[om] && shouldExcludeOrderType(orderTypeMap[om])) return;
+      
       const hasValidMat = mats.some(m => {
         const desc = up(String(m['Desc. Artículo'] || ''));
         const salidas = parseFloat(String(m['Salidas'] || '0'));
@@ -558,7 +570,7 @@ export default function AuditorApp() {
     };
     run();
     return () => { isMounted = false; };
-  }, [auditOutput, activeApiKey, activeModel, aiProvider, activeBaseUrl, dfTar]);
+  }, [auditOutput, activeApiKey, activeModel, aiProvider, activeBaseUrl, dfTar, dfOrd]);
 
 
   const results = [...(auditOutput?.results || []), ...aiAuditResults];
@@ -672,6 +684,10 @@ const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
     Object.entries(tasksByOrder).forEach(([order, oTasks]) => {
       // Si la orden tiene observaciones/desconexiones en resultados, no califica para cierre exitoso
       if (findingsByOrder.has(order)) return;
+
+      // Excluir tipos de orden Diagnóstico y Tercero del reporte de cierre
+      const ordDataForCheck = ordByOrder[order];
+      if (ordDataForCheck && shouldExcludeOrderType(ordDataForCheck.tipoOrden)) return;
 
       const parsedTasks = oTasks.map(t => {
         const tarea = String(t['Tarea'] || '');

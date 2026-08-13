@@ -50,6 +50,15 @@ export function isInsumoOFerreteria(textUp: string): boolean {
   return keywords.some(kw => cleanText.includes(up(kw)));
 }
 
+/**
+ * Verifica si un tipo de orden debe ser excluido de la auditoría.
+ * Los tipos "Diagnóstico" y "Tercero" no deben analizarse.
+ */
+export function shouldExcludeOrderType(tipoOrden: string): boolean {
+  const tipoUp = up(tipoOrden);
+  return tipoUp.includes('DIAGNOSTICO') || tipoUp.includes('TERCERO');
+}
+
 // ---------------------------------------------------------------------------
 // Normalización de verbos/acciones de taller.
 //
@@ -510,6 +519,8 @@ export function runAudit(
     if (ordData) {
       if (ordData.contabilizada.toUpperCase() === 'SI') return;
       if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+      // Excluir tipos de orden Diagnóstico y Tercero
+      if (shouldExcludeOrderType(ordData.tipoOrden)) return;
     }
 
     const matchedCategories = getMatchingCategories(tareaUp, activeParts);
@@ -522,6 +533,7 @@ export function runAudit(
     }
 
     const mats = matByOrder[orderStr] || [];
+    // Insumos: solo analizar cuando Salida=0 (no se excluyen completamente)
     const matList = mats.filter(m => !isInsumoOFerreteria(up(m['Desc. Artículo'] || ''))).map(m => up(m['Desc. Artículo']));
     const totalSalidas = mats.reduce((acc, m) => {
       const v = parseFloat(String(m['Salidas']));
@@ -575,12 +587,19 @@ export function runAudit(
     if (ordData) {
       if (ordData.contabilizada.toUpperCase() === 'SI') return;
       if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+      // Excluir tipos de orden Diagnóstico y Tercero
+      if (shouldExcludeOrderType(ordData.tipoOrden)) return;
     }
 
     const mats = matByOrder[orderStr] || [];
+    // Insumos: solo analizar cuando Salida=0 (no se excluyen completamente)
     const relevantMats = mats.filter(m => {
       const matDescUp = up(String(m['Desc. Artículo'] || ''));
-      return matDescUp && !isInsumoOFerreteria(matDescUp);
+      const salidas = parseFloat(String(m['Salidas'] || '0'));
+      // Incluir materiales que:
+      // 1. No son insumos y tienen salidas > 0, O
+      // 2. Son insumos y tienen salidas = 0 (para detectar hallazgo tipo 3)
+      return matDescUp && (isInsumoOFerreteria(matDescUp) ? salidas === 0 : salidas > 0);
     });
 
     const descCounts: Record<string, number> = {};
@@ -637,13 +656,19 @@ export function runAudit(
     if (ordData) {
       if (ordData.contabilizada.toUpperCase() === 'SI') return;
       if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
+      // Excluir tipos de orden Diagnóstico y Tercero
+      if (shouldExcludeOrderType(ordData.tipoOrden)) return;
     }
 
     const mats = matByOrder[orderStr] || [];
+    // Insumos: solo analizar cuando Salida=0 (no se excluyen completamente)
     const relevantMats = mats.filter(m => {
       const matDescUp = up(String(m['Desc. Artículo'] || ''));
       const salidas = parseFloat(String(m['Salidas'] || '0'));
-      return matDescUp && !isInsumoOFerreteria(matDescUp) && salidas > 0;
+      // Incluir materiales que:
+      // 1. No son insumos y tienen salidas > 0, O
+      // 2. Son insumos y tienen salidas = 0 (para detectar hallazgo tipo 3)
+      return matDescUp && (isInsumoOFerreteria(matDescUp) ? salidas === 0 : salidas > 0);
     });
 
     if (relevantMats.length === 0) return;

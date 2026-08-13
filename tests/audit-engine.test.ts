@@ -19,8 +19,9 @@ import {
   getActionType,
   explicitReplacementNeeded,
   runAudit,
+  shouldExcludeOrderType,
 } from '../src/lib/audit-engine';
-import type { TareaRow, MaterialRow } from '../src/lib/audit-types';
+import type { TareaRow, MaterialRow, OrdenRow } from '../src/lib/audit-types';
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -165,6 +166,71 @@ test('Agregar aceite con material de aceite cargado => sin hallazgo', () => {
   const dfMat = [material('OM-300', 'ACEITE 15W40', 5)];
   const { results } = runAudit(dfTar, dfMat, {});
   assert.strictEqual(results.filter(r => String(r['Nro. Orden']) === 'OM-300').length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// 6. Exclusión de tipos de orden Diagnóstico y Tercero
+// ---------------------------------------------------------------------------
+test('shouldExcludeOrderType excluye Diagnóstico', () => {
+  assert.strictEqual(shouldExcludeOrderType('Diagnóstico'), true);
+  assert.strictEqual(shouldExcludeOrderType('DIAGNOSTICO'), true);
+  assert.strictEqual(shouldExcludeOrderType('Orden de Diagnóstico'), true);
+});
+
+test('shouldExcludeOrderType excluye Tercero', () => {
+  assert.strictEqual(shouldExcludeOrderType('Tercero'), true);
+  assert.strictEqual(shouldExcludeOrderType('TERCERO'), true);
+  assert.strictEqual(shouldExcludeOrderType('Orden Tercero'), true);
+});
+
+test('shouldExcludeOrderType NO excluye otros tipos', () => {
+  assert.strictEqual(shouldExcludeOrderType('Correctiva'), false);
+  assert.strictEqual(shouldExcludeOrderType('Preventiva'), false);
+  assert.strictEqual(shouldExcludeOrderType(''), false);
+});
+
+function orden(orderNum: string, tipoOrden: string, extra: Partial<OrdenRow> = {}): OrdenRow {
+  return {
+    'Nro. orden': orderNum,
+    'Tipo de orden': tipoOrden,
+    'Estado': 'Cerrada',
+    'Contabilizada': 'No',
+    ...extra,
+  };
+}
+
+test('Órdenes de tipo Diagnóstico se excluyen de la auditoría', () => {
+  const dfTar = [tarea('OM-DIAG', 'CAMBIO DE FILTRO DE AIRE')];
+  const dfMat = [material('OM-DIAG', 'FILTRO DE AIRE', 1)];
+  const dfOrd = [orden('OM-DIAG', 'Diagnóstico')];
+  const { results } = runAudit(dfTar, dfMat, {}, dfOrd);
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-DIAG');
+  assert.strictEqual(findings.length, 0, `Órdenes de Diagnóstico no deberían generar hallazgos, hubo: ${findings.length}`);
+});
+
+test('Órdenes de tipo Tercero se excluyen de la auditoría', () => {
+  const dfTar = [tarea('OM-TERC', 'CAMBIO DE CORREA')];
+  const dfMat = [material('OM-TERC', 'CORREA DENTADA', 1)];
+  const dfOrd = [orden('OM-TERC', 'Tercero')];
+  const { results } = runAudit(dfTar, dfMat, {}, dfOrd);
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-TERC');
+  assert.strictEqual(findings.length, 0, `Órdenes de Tercero no deberían generar hallazgos, hubo: ${findings.length}`);
+});
+
+// ---------------------------------------------------------------------------
+// 7. Materiales sin tarea (huérfanos) - Prueba de corrección
+// ---------------------------------------------------------------------------
+test('Material que no coincide con ninguna tarea => hallazgo tipo 4 (huérfano)', () => {
+  const dfTar = [tarea('OM-ORPH', 'CAMBIO DE FILTRO DE ACEITE')];
+  const dfMat = [
+    material('OM-ORPH', 'FILTRO ACEITE', 1),
+    material('OM-ORPH', 'CORREA DENTADA', 1),  // Este material no tiene tarea asociada
+  ];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-ORPH');
+  const orphanFindings = findings.filter(r => r['Detalle'] && r['Detalle'].includes('CORREA'));
+  assert.strictEqual(orphanFindings.length, 1, `Debería detectar CORREA como huérfano, hallazgos: ${JSON.stringify(findings)}`);
+  assert.ok(orphanFindings[0]['Tipo de Hallazgo'].startsWith('4)'), 'Debe ser hallazgo tipo 4');
 });
 
 console.log(`\n${passed} pruebas pasaron correctamente.`);
