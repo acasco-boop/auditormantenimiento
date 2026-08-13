@@ -233,4 +233,28 @@ test('Material que no coincide con ninguna tarea => hallazgo tipo 4 (huérfano)'
   assert.ok(orphanFindings[0]['Tipo de Hallazgo'].startsWith('4)'), 'Debe ser hallazgo tipo 4');
 });
 
+// ---------------------------------------------------------------------------
+// 8. Tarea de lubricación sin material de lubricante
+// ---------------------------------------------------------------------------
+test('Tarea de Engrase sin material de Grasa => hallazgo tipo 2', () => {
+  const dfTar = [tarea('OM-LUB', 'ENGRASAR TRACTOR COMPLETO')];
+  const dfMat = [
+    material('OM-LUB', 'FILTRO DE ACEITE', 1),  // Material que NO es lubricante
+  ];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-LUB');
+  assert.strictEqual(findings.length, 1, `Debería generar hallazgo por falta de grasa, hallazgos: ${JSON.stringify(findings)}`);
+  assert.ok(findings[0]['Tipo de Hallazgo'].startsWith('2)'), `Debe ser hallazgo tipo 2, fue: ${findings[0]['Tipo de Hallazgo']}`);
+});
+
+test('Tarea de Engrase CON material de Grasa => sin hallazgo', () => {
+  const dfTar = [tarea('OM-LUB2', 'ENGRASAR CRUCETA CARDAN')];
+  const dfMat = [
+    material('OM-LUB2', 'GRASA MULTIPROPOSITO EP2', 2),
+  ];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-LUB2');
+  assert.strictEqual(findings.length, 0, `No debería generar hallazgo, hubo: ${JSON.stringify(findings)}`);
+});
+
 console.log(`\n${passed} pruebas pasaron correctamente.`);

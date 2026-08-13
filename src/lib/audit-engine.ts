@@ -540,6 +540,20 @@ export function runAudit(
       return acc + (isNaN(v) ? 0 : v);
     }, 0);
 
+    // Verificar si la tarea es de lubricación y hay material de lubricante
+    const actionType = getActionType(tareaUp);
+    const isLubricationTask = actionType === 'LUBRICACION';
+    const hasLubricantMaterial = mats.some(m => {
+      const desc = up(String(m['Desc. Artículo'] || ''));
+      const salidas = parseFloat(String(m['Salidas'] || '0'));
+      if (salidas <= 0) return false;
+      return LUBRICANT_CATEGORIES.some(cat => {
+        const synonyms = activeParts[cat] || [];
+        const allSynonyms = [cat, ...synonyms];
+        return allSynonyms.some(syn => matchMaterial(desc, up(syn)));
+      });
+    });
+
     const base: AuditResult = {
       'Nro. Orden': order,
       'Equipo': String(row['Codigo equipo'] || ''),
@@ -562,6 +576,12 @@ export function runAudit(
       results.push({ ...base,
         'Tipo de Hallazgo': '1) Orden sin repuestos asignados',
         'Detalle': 'Ningún material cargado en la orden',
+      });
+    } else if (isLubricationTask && !hasLubricantMaterial) {
+      // Tarea de lubricación sin material de grasa/aceite/refrigerante
+      results.push({ ...base,
+        'Tipo de Hallazgo': '2) Falta material (IA)',
+        'Detalle': 'Tarea de lubricación sin material de grasa, aceite o refrigerante en la orden',
       });
     } else if (totalSalidas === 0) {
       results.push({ ...base,
