@@ -229,8 +229,9 @@ export async function runAIAudit(params: {
           t.tarea.toUpperCase().trim() === pt.tarea.toUpperCase().trim()
         );
 
-        if (tv && tv.resultado === 'FALTA MATERIAL' && typeof tv.confianza === 'number' && tv.confianza >= 0.60) {
-          const isHighConf = tv.confianza >= 0.85;
+        const conf = parseFloat(String(tv?.confianza || '1'));
+        if (tv && tv.resultado === 'FALTA MATERIAL' && conf >= 0.60) {
+          const isHighConf = conf >= 0.85;
           auditResults.push({
             'Nro. Orden': omStr,
             'Equipo': pt.equipo,
@@ -241,7 +242,7 @@ export async function runAIAudit(params: {
             'Detalle': tv.justificacion || `Acción: ${tv.accion || '?'}, Objeto: ${tv.objeto_principal || '?'}`,
             'Resultado IA': tv.resultado,
             'Material Relacionado': tv.descripcion_material || '',
-            'Confianza IA': tv.confianza,
+            'Confianza IA': conf,
             'Justificación IA': tv.justificacion || '',
             ...baseOrdFields,
           });
@@ -249,7 +250,8 @@ export async function runAIAudit(params: {
       }
 
       for (const mv of iaRes.materiales_huerfanos) {
-        if (mv.resultado === 'SIN TAREA' && typeof mv.confianza === 'number' && mv.confianza >= 0.60) {
+        const conf2 = parseFloat(String(mv?.confianza || '1'));
+        if (mv.resultado === 'SIN TAREA' && conf2 >= 0.60) {
           auditResults.push({
             'Nro. Orden': omStr,
             'Equipo': equipo,
@@ -260,7 +262,7 @@ export async function runAIAudit(params: {
             'Detalle': mv.justificacion || `Material "${mv.descripcion}" sin tarea que lo justifique`,
             'Resultado IA': mv.resultado,
             'Material Relacionado': mv.descripcion || '',
-            'Confianza IA': mv.confianza,
+            'Confianza IA': conf2,
             'Justificación IA': mv.justificacion || '',
             ...baseOrdFields,
           });
