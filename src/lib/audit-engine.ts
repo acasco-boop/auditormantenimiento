@@ -288,8 +288,10 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string, tareaUp?
       const cleanTaskContext = taskContextWords.filter(w => !phraseWordsSet.has(w) && !categorySynonyms.has(w));
       const cleanMatContext = matContextWords.filter(w => !phraseWordsSet.has(w) && !categorySynonyms.has(w));
 
-      if (cleanTaskContext.length > 0) {
-        const allWordsMatched = cleanTaskContext.every(tW => {
+      if (cleanTaskContext.length > 0 && cleanMatContext.length > 0) {
+        // Verificar que AL MENOS UNA palabra de contexto de la tarea coincida con el material
+        // Esto evita falsos negativos cuando el material no tiene TODAS las palabras contextuales
+        const someWordsMatched = cleanTaskContext.some(tW => {
           return cleanMatContext.some(mW => {
             if (mW === tW) return true;
             if (mW === tW + 'S' || mW === tW + 'ES') return true;
@@ -297,7 +299,7 @@ export function matchMaterial(matDescUp: string, synonymPhrase: string, tareaUp?
           });
         });
         
-        if (!allWordsMatched) {
+        if (!someWordsMatched) {
           return false;
         }
       }
@@ -545,8 +547,17 @@ export function runAudit(
     const isLubricationTask = actionType === 'LUBRICACION';
     const hasLubricantMaterial = mats.some(m => {
       const desc = up(String(m['Desc. Artículo'] || ''));
+      if (!desc) return false;
+      return LUBRICANT_CATEGORIES.some(cat => {
+        const synonyms = activeParts[cat] || [];
+        const allSynonyms = [cat, ...synonyms];
+        return allSynonyms.some(syn => matchMaterial(desc, up(syn)));
+      });
+    });
+    const hasLubricantWithSalida = mats.some(m => {
+      const desc = up(String(m['Desc. Artículo'] || ''));
       const salidas = parseFloat(String(m['Salidas'] || '0'));
-      if (salidas <= 0) return false;
+      if (!desc || salidas <= 0) return false;
       return LUBRICANT_CATEGORIES.some(cat => {
         const synonyms = activeParts[cat] || [];
         const allSynonyms = [cat, ...synonyms];
@@ -578,10 +589,24 @@ export function runAudit(
         'Detalle': 'Ningún material cargado en la orden',
       });
     } else if (isLubricationTask && !hasLubricantMaterial) {
-      // Tarea de lubricación sin material de grasa/aceite/refrigerante
+      // Tarea de lubricación sin material de grasa/aceite/refrigerante en absoluto
       results.push({ ...base,
         'Tipo de Hallazgo': '2) Falta material (IA)',
         'Detalle': 'Tarea de lubricación sin material de grasa, aceite o refrigerante en la orden',
+      });
+    } else if (isLubricationTask && hasLubricantMaterial && !hasLubricantWithSalida) {
+      // Tarea de lubricación con material planificado pero sin salida física
+      const lubricantMats = mats.filter(m => {
+        const desc = up(String(m['Desc. Artículo'] || ''));
+        return desc && LUBRICANT_CATEGORIES.some(cat => {
+          const synonyms = activeParts[cat] || [];
+          const allSynonyms = [cat, ...synonyms];
+          return allSynonyms.some(syn => matchMaterial(desc, up(syn)));
+        });
+      });
+      results.push({ ...base,
+        'Tipo de Hallazgo': '3) Planificado sin Salida física (Salidas = 0)',
+        'Detalle': 'Material de lubricante planificado con Salida Cero: ' + lubricantMats.map(m => String(m['Desc. Artículo'] || '')).join(', '),
       });
     } else if (totalSalidas === 0) {
       results.push({ ...base,
@@ -772,21 +797,38 @@ export function runAudit(
         const tarea = String(t['Tarea'] || '');
         const tareaUp = up(tarea);
         
-        // Obtener las categorías que coinciden con esta tarea
+        // 1. Intentar con el diccionario (método original)
         const matchedCategories = getMatchingCategories(tareaUp, activeParts);
-        
-        // Verificar si el material coincide con alguna categoría de la tarea
-        return matchedCategories.some(cat => {
-          // Obtener los sinónimos de esta categoría
+        const dictMatch = matchedCategories.some(cat => {
           const synonyms = activeParts[cat] || [];
           const allSynonyms = [cat, ...synonyms];
-          
-          // Verificar si el material coincide con algún sinónimo
           return allSynonyms.some(syn => {
             const synUp = up(syn);
             return matchMaterial(matDescUp, synUp, tareaUp, activeParts);
           });
         });
+        
+        if (dictMatch) return true;
+        
+        // 2. Verificación directa: comparar palabras del material con palabras de la tarea
+        // Esto captura casos donde el material tiene un nombre largo/diferente al diccionario
+        const stopWords = new Set(['DE', 'DEL', 'CON', 'SIN', 'POR', 'PARA', 'LOS', 'LAS', 'UNA', 'UNO', 'UNOS', 'UNAS', 'ESTE', 'ESTA', 'COMO', 'MAS', 'QUE', 'DELA', 'Y', 'O', 'LA', 'EL', 'EN', 'UN', 'AL', 'DI', 'SU']);
+        const actionWords = ACTION_WORDS;
+        
+        const matWords = matDescUp.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && w.length >= 3 && !stopWords.has(w));
+        const taskWords = tareaUp.split(/[^A-Z0-9]/).map(w => w.trim()).filter(w => w && w.length >= 3 && !stopWords.has(w) && !actionWords.has(w));
+        
+        // Si al menos una palabra significativa del material está en la tarea, considerar justificado
+        const directMatch = matWords.some(mWord => {
+          return taskWords.some(tWord => {
+            if (mWord === tWord) return true;
+            if (mWord === tWord + 'S' || mWord === tWord + 'ES') return true;
+            if (tWord === mWord + 'S' || tWord === mWord + 'ES') return true;
+            return isFuzzyMatch(mWord, tWord);
+          });
+        });
+        
+        return directMatch;
       });
       
       // Si el material no está justificado por ninguna tarea, marcarlo como huérfano

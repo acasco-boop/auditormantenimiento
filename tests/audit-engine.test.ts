@@ -257,4 +257,61 @@ test('Tarea de Engrase CON material de Grasa => sin hallazgo', () => {
   assert.strictEqual(findings.length, 0, `No debería generar hallazgo, hubo: ${JSON.stringify(findings)}`);
 });
 
+test('Tarea de Engrase CON material de Grasa pero Salida=0 => hallazgo tipo 3', () => {
+  const dfTar = [tarea('OM-LUB3', 'ENGRASAR TRACTOR COMPLETO')];
+  const dfMat = [
+    material('OM-LUB3', 'GRASA MULTIPROPOSITO EP2', 0),  // Material planificado pero sin salida
+  ];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-LUB3');
+  assert.strictEqual(findings.length, 1, `Debería generar hallazgo tipo 3, hallazgos: ${JSON.stringify(findings)}`);
+  assert.ok(findings[0]['Tipo de Hallazgo'].startsWith('3)'), `Debe ser hallazgo tipo 3, fue: ${findings[0]['Tipo de Hallazgo']}`);
+});
+
+// ---------------------------------------------------------------------------
+// 9. Validación de contexto relajada
+// ---------------------------------------------------------------------------
+test('Material "FILTRO" coincide con tarea "CAMBIO DE FILTRO DE AIRE" (contexto parcial)', () => {
+  const dfTar = [tarea('OM-CTX', 'CAMBIO DE FILTRO DE AIRE')];
+  const dfMat = [material('OM-CTX', 'FILTRO', 1)];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-CTX');
+  assert.strictEqual(findings.length, 0, `FILTRO debería coincidir con CAMBIO DE FILTRO DE AIRE, hallazgos: ${JSON.stringify(findings)}`);
+});
+
+test('Material "CORREA" coincide con tarea "CAMBIO DE CORREA DE DIRECCION" (contexto parcial)', () => {
+  const dfTar = [tarea('OM-CTX2', 'CAMBIO DE CORREA DE DIRECCION')];
+  const dfMat = [material('OM-CTX2', 'CORREA', 1)];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-CTX2');
+  assert.strictEqual(findings.length, 0, `CORREA debería coincidir con CAMBIO DE CORREA DE DIRECCION, hallazgos: ${JSON.stringify(findings)}`);
+});
+
+test('Material "CORREA DE DISTRIBUCION" NO coincide con tarea "CAMBIO DE CORREA DE DIRECCION" (contexto incompatible)', () => {
+  const dfTar = [tarea('OM-CTX3', 'CAMBIO DE CORREA DE DIRECCION')];
+  const dfMat = [material('OM-CTX3', 'CORREA DE DISTRIBUCION', 1)];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-CTX3');
+  assert.strictEqual(findings.length, 1, `CORREA DE DISTRIBUCION NO debería coincidir con CORREA DE DIRECCION, hallazgos: ${JSON.stringify(findings)}`);
+});
+
+// ---------------------------------------------------------------------------
+// 10. Materiales con nombres largos/diferentes al diccionario
+// ---------------------------------------------------------------------------
+test('Material con nombre largo "CUENTA REVOLUCIONES MB (A 004 542 26 16) - ORIGINAL" coincide con tarea "CAMBIO DE CUENTA REVOLUCIONES"', () => {
+  const dfTar = [tarea('OM-LONG', 'CAMBIO DE CUENTA REVOLUCIONES')];
+  const dfMat = [material('OM-LONG', 'CUENTA REVOLUCIONES MB (A 004 542 26 16) - ORIGINAL', 1)];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-LONG');
+  assert.strictEqual(findings.length, 0, `CUENTA REVOLUCIONES debería coincidir, hallazgos: ${JSON.stringify(findings)}`);
+});
+
+test('Material con nombre largo "CAJA REGULADORA TRASERA 28 ESTRIAS UNIVERSAL (Art. Reparado)" coincide con tarea "CAMBIO DE CAJA REGULADORA"', () => {
+  const dfTar = [tarea('OM-LONG2', 'CAMBIO DE CAJA REGULADORA')];
+  const dfMat = [material('OM-LONG2', 'CAJA REGULADORA TRASERA 28 ESTRIAS UNIVERSAL (Art. Reparado)', 1)];
+  const { results } = runAudit(dfTar, dfMat, {});
+  const findings = results.filter(r => String(r['Nro. Orden']) === 'OM-LONG2');
+  assert.strictEqual(findings.length, 0, `CAJA REGULADORA debería coincidir, hallazgos: ${JSON.stringify(findings)}`);
+});
+
 console.log(`\n${passed} pruebas pasaron correctamente.`);
