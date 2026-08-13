@@ -1,4 +1,4 @@
-import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, MetricBreakdown } from './audit-types';
+import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, MetricBreakdown, PendingAITask } from './audit-types';
 import { PARTS_TO_CHECK, LUBRICANT_CATEGORIES } from './parts-dictionary';
 
 export function stripAccents(str: string): string {
@@ -438,6 +438,7 @@ export interface AuditOutput {
   results: AuditResult[];
   unrecognizedTasks: UnrecognizedTask[];
   matByOrder: Record<string, MaterialRow[]>;
+  pendingAIReview: PendingAITask[];
   metrics: {
     c1: number; c2: number; c3: number; c4: number; c5: number;
     b1: MetricBreakdown; b2: MetricBreakdown; b3: MetricBreakdown; b4: MetricBreakdown; b5: MetricBreakdown;
@@ -493,7 +494,7 @@ export function runAudit(
   const activeParts = { ...PARTS_TO_CHECK, ...customDict };
   const unrecognizedMap: Record<string, UnrecognizedTask> = {};
   const results: AuditResult[] = [];
-  const orderReplacementCats: Record<string, Set<string>> = {};
+  const pendingAIReview: PendingAITask[] = [];
 
   dfTar.forEach(row => {
     const tarea = row['Tarea'] === null || row['Tarea'] === undefined ? '' : String(row['Tarea']);
@@ -512,12 +513,6 @@ export function runAudit(
     }
 
     const matchedCategories = getMatchingCategories(tareaUp, activeParts);
-    if (!orderReplacementCats[orderStr]) {
-      orderReplacementCats[orderStr] = new Set();
-    }
-    matchedCategories.forEach(cat => {
-      orderReplacementCats[orderStr].add(cat);
-    });
 
     const matchesKnownCategory = matchedCategories.length > 0;
     if (!matchesKnownCategory) {
@@ -562,103 +557,16 @@ export function runAudit(
         'Detalle': 'Materiales planificados con Salida Cero: ' + mats.map(m => String(m['Desc. Artículo'] || '')).join(', '),
       });
     } else {
-      const missingCategories: string[] = [];
-      for (const cat of matchedCategories) {
-        const matsKws = activeParts[cat];
-        const found = matList.some(m => matsKws.some(mk => matchMaterial(m, up(mk), tareaUp, activeParts)));
-        if (!found) missingCategories.push(cat);
-      }
-
-      // Validación de coherencia Tarea (acción) <-> Material.
-      // Ej: una tarea de tipo LUBRICACION ("Engrase"/"Engrasar") debe tener
-      // asociado un material de tipo grasa/lubricante/refrigerante; si el
-      // material cargado es, en cambio, un repuesto físico (o viceversa),
-      // se considera una desconexión aunque la categoría por sí sola matchee.
-      const actionType = getActionType(tareaUp);
-      let actionMismatch = false;
-      if (actionType === 'LUBRICACION') {
-        const lubricantFound = matList.some(m =>
-          LUBRICANT_CATEGORIES.some(cat => (activeParts[cat] || []).some(kw => m.includes(up(kw))))
-        );
-        if (!lubricantFound) actionMismatch = true;
-      }
-
-      if (missingCategories.length > 0 || actionMismatch) {
-        const motivos: string[] = [];
-        if (missingCategories.length > 0) motivos.push(`Falta '${missingCategories.join("', '")}'`);
-        if (actionMismatch) motivos.push(`Acción de lubricación ('${tarea}') sin material de tipo grasa/lubricante`);
-        results.push({ ...base,
-          'Tipo de Hallazgo': `2) Desconexión de material (${motivos.join('; ')})`,
-          'Detalle': 'Materiales cargados no coinciden: ' + mats.map(m => String(m['Desc. Artículo'] || '')).join(', '),
-        });
-      }
-    }
-  });
-
-  // Auditoría inversa: Repuestos cargados sin tarea asociada
-  Object.keys(matByOrder).forEach(orderStr => {
-    const ordData = ordByOrder[orderStr];
-    if (ordData) {
-      if (ordData.contabilizada.toUpperCase() === 'SI') return;
-      if (ordData.estadoOrden.toUpperCase().includes('CANCELADA')) return;
-    }
-
-    const mats = matByOrder[orderStr] || [];
-    const issuedMats = mats.filter(m => {
-      const v = parseFloat(String(m['Salidas']));
-      return !isNaN(v) && v > 0;
-    });
-    if (issuedMats.length === 0) return;
-
-    const taskCats = orderReplacementCats[orderStr] || new Set<string>();
-
-    issuedMats.forEach(m => {
-      const matDesc = String(m['Desc. Artículo'] || '');
-      const matDescUp = up(matDesc);
-      if (isInsumoOFerreteria(matDescUp)) return;
-
-      // Encontrar a qué categorías del diccionario corresponde el material
-      const matchedCatsByMat = Object.keys(activeParts).filter(cat => {
-        const synonyms = activeParts[cat] || [];
-        return synonyms.some(syn => matchMaterial(matDescUp, up(syn)));
+      pendingAIReview.push({
+        orderStr,
+        tarea,
+        tareaUp,
+        equipo: String(row['Codigo equipo'] || ''),
+        nombreEquipo: String(row['Nombre Equipo'] || ''),
+        estadoTarea: String(row['Estado'] || ''),
+        ...(ordData ? { ordData } : {}),
       });
-
-      // Si el material corresponde a alguna categoría auditada, pero ninguna de esas
-      // categorías está cubierta por las tareas de la orden
-      if (matchedCatsByMat.length > 0) {
-        const hasTask = matchedCatsByMat.some(cat => taskCats.has(cat));
-        if (!hasTask) {
-          // Buscar datos de equipo de las tareas si existen para esta orden
-          let eqCode = String(m['Equipo'] || '');
-          let eqName = String(m['Descripción'] || '');
-          if (!eqCode || !eqName) {
-            const taskRow = dfTar.find(t => String(t['Nro. Orden'] || t['DocNum'] || '') === orderStr);
-            if (taskRow) {
-              eqCode = eqCode || String(taskRow['Codigo equipo'] || '');
-              eqName = eqName || String(taskRow['Nombre Equipo'] || '');
-            }
-          }
-
-          results.push({
-            'Nro. Orden': orderStr,
-            'Equipo': eqCode,
-            'Nombre Equipo': eqName,
-            'Tarea': 'Sin tarea asociada',
-            'Estado Tarea': 'Sin tarea',
-            'Tipo de Hallazgo': `4) Repuesto sin tarea asociada`,
-            'Detalle': `Se retiró el material "${matDesc}" (${m['Salidas']} unidades) pero no existe ninguna tarea de recambio en la orden que requiera esta categoría (${matchedCatsByMat.join(', ')}).`,
-            ...(ordData ? {
-              'Tipo de orden': ordData.tipoOrden || undefined,
-              'Centros de costos': ordData.centrosCostos || undefined,
-              'Estado Orden': ordData.estadoOrden || undefined,
-              'Contabilizada': ordData.contabilizada || undefined,
-              'Fecha de la orden': ordData.fechaOrden || undefined,
-              'Status de documento': ordData.statusDoc || undefined,
-            } : {}),
-          });
-        }
-      }
-    });
+    }
   });
 
   // Auditoría: Materiales Repetidos
@@ -725,9 +633,7 @@ export function runAudit(
 
   // Calculate metrics
   const r1 = results.filter(r => r['Tipo de Hallazgo'].startsWith('1)'));
-  const r2 = results.filter(r => r['Tipo de Hallazgo'].startsWith('2)'));
   const r3 = results.filter(r => r['Tipo de Hallazgo'].startsWith('3)'));
-  const r4 = results.filter(r => r['Tipo de Hallazgo'].startsWith('4)'));
   const r5 = results.filter(r => r['Tipo de Hallazgo'].startsWith('5)'));
 
   const calcBreakdown = (subset: AuditResult[], hasWarehouse: boolean): MetricBreakdown => {
@@ -765,12 +671,13 @@ export function runAudit(
     results,
     unrecognizedTasks,
     matByOrder,
+    pendingAIReview,
     metrics: {
-      c1: r1.length, c2: r2.length, c3: r3.length, c4: r4.length, c5: r5.length,
+      c1: r1.length, c2: 0, c3: r3.length, c4: 0, c5: r5.length,
       b1: calcBreakdown(r1, false),
-      b2: calcBreakdown(r2, true),
+      b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
       b3: calcBreakdown(r3, true),
-      b4: calcBreakdown(r4, true),
+      b4: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
       b5: calcBreakdown(r5, true),
     }
   };

@@ -24,20 +24,20 @@ export interface OrdenRow {
   'Tipo de orden'?: string | null;
   'Centos de costos'?: string | null;
   'Estado'?: string | null;
-  'Código de equipo'?: string | null;
+  'Codigo de equipo'?: string | null;
   'Nombre equipo'?: string | null;
   [key: string]: unknown;
 }
 
 export interface MaterialRow {
   'Equipo'?: string | null;
-  'Descripción'?: string | null;
+  'Descripcion'?: string | null;
   'Nro. OM'?: string | number | null;
   'Estado'?: string | null;
   'Fecha OM'?: string | Date | null;
   'ID Mateiales'?: string | number | null;
-  'Artículo'?: string | null;
-  'Desc. Artículo'?: string | null;
+  'Articulo'?: string | null;
+  'Desc. Articulo'?: string | null;
   'Almacen'?: string | null;
   'Cant. planificada'?: string | number | null;
   'Salidas'?: string | number | null;
@@ -55,6 +55,10 @@ export interface AuditResult {
   'Estado Tarea': string;
   'Tipo de Hallazgo': string;
   'Detalle': string;
+  'Resultado IA'?: string;
+  'Material Relacionado'?: string;
+  'Confianza IA'?: number;
+  'Justificacion IA'?: string;
   'Tipo de orden'?: string;
   'Centros de costos'?: string;
   'Estado Orden'?: string;
@@ -80,4 +84,64 @@ export interface AISuggestion {
   tarea: string;
   categoria: string | null;
   sinonimos: string[];
+}
+
+export interface AITaskVerdict {
+  tarea: string;
+  resultado: 'OK' | 'FALTA MATERIAL';
+  requiere_material: boolean;
+  accion: string;
+  objeto_principal: string;
+  sistema: string;
+  material_encontrado: boolean;
+  descripcion_material: string | null;
+  tipo_coincidencia: string;
+  confianza: number;
+  justificacion: string;
+}
+
+export interface AIMaterialVerdict {
+  descripcion: string;
+  resultado: 'SIN TAREA' | 'JUSTIFICADO';
+  tarea_relacionada: string | null;
+  confianza: number;
+  justificacion: string;
+}
+
+export interface AIOMResponse {
+  tareas: AITaskVerdict[];
+  materiales_huerfanos: AIMaterialVerdict[];
+}
+
+export interface PendingAITask {
+  orderStr: string;
+  tarea: string;
+  tareaUp: string;
+  equipo: string;
+  nombreEquipo: string;
+  estadoTarea: string;
+  ordData?: {
+    tipoOrden: string;
+    centrosCostos: string;
+    estadoOrden: string;
+    contabilizada: string;
+    fechaOrden: string;
+    statusDoc: string;
+  };
+}
+
+export interface PendingAIMaterial {
+  orderStr: string;
+  descripcion: string;
+  salidas: number;
+  equipo: string;
+  nombreEquipo: string;
+  ordData?: PendingAITask['ordData'];
+}
+
+export interface AIConfig {
+  apiKey: string;
+  model: string;
+  provider: string;
+  baseUrl: string;
 }

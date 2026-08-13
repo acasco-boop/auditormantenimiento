@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import type { TareaRow, MaterialRow, OrdenRow, AuditResult, UnrecognizedTask, AISuggestion, MetricBreakdown } from '@/lib/audit-types';
 import { runAudit, up, ACTION_WORDS, explicitReplacementNeeded } from '@/lib/audit-engine';
+import { runAIAudit } from '@/lib/ai-audit';
 import { PARTS_TO_CHECK } from '@/lib/parts-dictionary';
 import { requestOMCoherence, type CoherenceCheckResult } from '@/lib/ai-coherence';
 import { parseTabularFile, esc, thinBorder } from './shared-utils';
@@ -406,6 +407,12 @@ export default function AuditorApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [showKey, setShowKey] = useState(false);
 
+  // --- AI Audit Automation State ---
+  const [aiAuditProgress, setAiAuditProgress] = useState({ current: 0, total: 0, om: '' });
+  const [aiAuditResults, setAiAuditResults] = useState<AuditResult[]>([]);
+  const [isAiAuditing, setIsAiAuditing] = useState(false);
+
+
   // Carga asíncrona de configuraciones en el cliente para evitar mismatch de hidratación SSR
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -502,16 +509,72 @@ export default function AuditorApp() {
     catch (e) { setError(String((e as Error).message)); return null; }
   }, [dfTar, dfMat, customDict, dfOrd]);
 
-  const results = auditOutput?.results || [];
+  useEffect(() => {
+    if (!auditOutput) return;
+    if (!auditOutput.pendingAIReview || auditOutput.pendingAIReview.length === 0) {
+      setAiAuditResults([]);
+      return;
+    }
+    if (!activeApiKey) return;
+    if (isAiAuditing) return;
+
+    let isMounted = true;
+    const run = async () => {
+      setIsAiAuditing(true);
+      try {
+        const newResults = await runAIAudit({
+          pendingTasks: auditOutput.pendingAIReview,
+          matByOrder: auditOutput.matByOrder,
+          dfTar: dfTar || [],
+          aiConfig: { apiKey: activeApiKey, model: activeModel, provider: aiProvider, baseUrl: activeBaseUrl },
+          onProgress: (current, total, om) => {
+            if (isMounted) setAiAuditProgress({ current, total, om });
+          }
+        });
+        if (isMounted) setAiAuditResults(newResults);
+      } catch (err) {
+        console.error('Error en auditoría IA:', err);
+      } finally {
+        if (isMounted) setIsAiAuditing(false);
+      }
+    };
+    run();
+    return () => { isMounted = false; };
+  }, [auditOutput, activeApiKey, activeModel, aiProvider, activeBaseUrl, dfTar]);
+
+
+  const results = [...(auditOutput?.results || []), ...aiAuditResults];
   const unrecognizedTasks = auditOutput?.unrecognizedTasks || [];
-  const metrics = auditOutput?.metrics || {
-    c1: 0, c2: 0, c3: 0, c4: 0,
+  
+  // Recalcular métricas combinadas
+  const metrics = JSON.parse(JSON.stringify(auditOutput?.metrics || {
+    c1: 0, c2: 0, c3: 0, c4: 0, c5: 0,
     b1: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
     b2: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
     b3: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
-    b4: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }
-  };
-  const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
+    b4: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] },
+    b5: { taskCount: 0, uniqueOMs: 0, warehouses: [], tiposOrden: [] }
+  }));
+
+  const uniqueOmsC2 = new Set<string>();
+  const uniqueOmsC4 = new Set<string>();
+  
+  aiAuditResults.forEach(r => {
+    const tipo = String(r['Tipo de Hallazgo'] || '');
+    if (tipo.startsWith('2)')) {
+      metrics.c2++;
+      metrics.b2.taskCount++;
+      uniqueOmsC2.add(String(r['Nro. Orden']));
+    } else if (tipo.startsWith('4)')) {
+      metrics.c4++;
+      metrics.b4.taskCount++;
+      uniqueOmsC4.add(String(r['Nro. Orden']));
+    }
+  });
+  metrics.b2.uniqueOMs = uniqueOmsC2.size;
+  metrics.b4.uniqueOMs = uniqueOmsC4.size;
+
+const uniqueOrders = [...new Set(results.map(r => String(r['Nro. Orden'])))];
 
   const closingReport = React.useMemo(() => {
     if (!dfTar) return [];
@@ -784,7 +847,7 @@ Lista de tareas:\n${listado}`;
       'Nro. Orden', 'Tipo de orden', 'Centros de costos', 
       'Estado Orden', 'Contabilizada', 'Fecha de la orden', 'Status de documento', 
       'Equipo', 'Nombre Equipo', 'Tarea', 'Estado Tarea', 
-      'Tipo de Hallazgo', 'Detalle'
+      'Tipo de Hallazgo', 'Detalle', 'Resultado IA', 'Material Relacionado', 'Confianza IA', 'Justificación IA'
     ];
     ws.addRow(cols); results.forEach(r => ws.addRow(cols.map(c => r[c as keyof AuditResult])));
     const headerRow = ws.getRow(1);
@@ -1396,7 +1459,7 @@ Lista de tareas:\n${listado}`;
                 bgGlow="bg-gradient-to-br from-amber-950/50 via-amber-900/15 to-transparent"
                 barColor="bg-gradient-to-r from-amber-500 to-amber-400" valueColor="text-amber-400"
                 gradientBorder="gradient-border-amber" delay="animate-fade-in-up-1" />
-              <MetricCard count={metrics.c2} label="Desconexión / cruce erróneo" breakdown={metrics.b2} hasWarehouse={true}
+              <MetricCard count={metrics.c2} label="Falta material (IA)" breakdown={metrics.b2} hasWarehouse={true}
                 icon={<XCircle className="w-5 h-5 text-orange-400" />}
                 bgGlow="bg-gradient-to-br from-orange-950/50 via-orange-900/15 to-transparent"
                 barColor="bg-gradient-to-r from-orange-500 to-orange-400" valueColor="text-orange-400"
@@ -1406,7 +1469,7 @@ Lista de tareas:\n${listado}`;
                 bgGlow="bg-gradient-to-br from-emerald-950/50 via-emerald-900/15 to-transparent"
                 barColor="bg-gradient-to-r from-emerald-500 to-teal-400" valueColor="text-emerald-400"
                 gradientBorder="gradient-border-emerald" delay="animate-fade-in-up-3" />
-              <MetricCard count={metrics.c4} label="Repuestos sin Tarea registrada" breakdown={metrics.b4} hasWarehouse={true}
+              <MetricCard count={metrics.c4} label="Repuesto sin tarea (IA)" breakdown={metrics.b4} hasWarehouse={true}
                 icon={<ClipboardList className="w-5 h-5 text-violet-400" />}
                 bgGlow="bg-gradient-to-br from-violet-950/50 via-violet-900/15 to-transparent"
                 barColor="bg-gradient-to-r from-violet-500 to-violet-400" valueColor="text-violet-400"
