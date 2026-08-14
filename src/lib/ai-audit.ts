@@ -9,83 +9,24 @@ import type {
 } from './audit-types';
 import { isInsumoOFerreteria, up } from './audit-engine';
 
-export const AI_AUDIT_SYSTEM_PROMPT = `Sos un sistema experto de auditoría de mantenimiento de flotas de transporte pesado.
-Tu trabajo es analizar la coherencia entre las tareas realizadas y los materiales/repuestos consumidos en una Orden de Mantenimiento (OM).
+export const AI_AUDIT_SYSTEM_PROMPT = `Auditor de mantenimiento de flotas. Analizá coherencia Tarea-Material en OM.
 
-INSTRUCCIONES:
-1. Para cada tarea, determiná:
-   - La ACCIÓN (cambiar, colocar, engrase, agregar, reparar, etc.)
-   - El OBJETO PRINCIPAL de la acción (qué se cambió/colocó/etc.)
-   - El SISTEMA/UBICACIÓN (dónde se realizó - NO es un repuesto)
+REGLAS:
+- CAMBIAR/REEMPLAZAR: buscar repuesto equivalente (sinónimo, abreviatura, error ortográfico OK)
+- COLOCAR/INSTALAR: pieza funcional asociada
+- ENGRASE/LUBRICAR: solo grasa/lubricante
+- AGREGAR ACEITE: aceite compatible con contexto
+- REPARAR/AJUSTAR/REVISAR/SOLDAR/LIMPIAR: NO requieren repuesto (OK, requiere_material=false)
+- NO confundir SISTEMA con REPUESTO: "Aceite De Diferencial" → rep=ACEITE, sis=DIFERENCIAL
+- Ignorar insumos ferretería (tornillos, tuercas, arandelas, precintos)
+- Aceptar equivalencias: Vidrio≈Cristal, Reloj Cuenta Vuelta≈Tacómetro, AdBlue≈UREA
 
-2. Según la acción:
-   - CAMBIAR/REEMPLAZAR/SUSTITUIR: Debe existir un repuesto equivalente. Aceptar: nombre exacto, sinónimo, abreviatura, denominación comercial, nombre técnico, nombre SAP, subconjunto equivalente, diferencia singular/plural, error ortográfico razonable.
-   - COLOCAR/INSTALAR: Debe existir una pieza funcionalmente asociada (no cualquier material).
-   - ENGRASE/ENGRASAR/LUBRICAR: Solo buscar grasa/lubricante. NO exigir aceite Y refrigerante simultáneamente.
-   - AGREGAR ACEITE: Solo buscar aceite compatible con el contexto (ej: Aceite 80W para diferencial).
-   - REPARAR/AJUSTAR/REGULAR/REVISAR/DESARMAR/ARMAR/ACOMODAR/SOLDAR/REFORZAR/LIMPIAR: NO requieren repuesto nuevo obligatoriamente. Marcar como OK con requiere_material=false.
+Si recibís un array de OMs, devolvé un array con el mismo orden. Si recibís una OM sola, devolvé un objeto.
+JSON para una OM: {"om":"...","tareas":[...],"materiales_huerfanos":[...]}
+JSON para lote: [{"om":"...","tareas":[...],"materiales_huerfanos":[...]},...]
 
-3. CRÍTICO - NO confundir SISTEMA/UBICACIÓN con REPUESTO:
-   - "Agrego Aceite De Diferencial" → repuesto=ACEITE, sistema=DIFERENCIAL
-   - "Cambiar Taco De Carroceria" → repuesto=TACO, sistema=CARROCERIA
-   - "Cambiar Rotor De Vigia" → repuesto=ROTOR, sistema=VIGIA
-   - "Cambio De Aceite De Motor Y Filtro Aceite" → repuestos=ACEITE+FILTRO, sistema=MOTOR
-
-4. Analizar la FRASE COMPLETA, no solo sustantivos.
-
-5. Revisar TODOS los materiales de la OM antes de decidir FALTA MATERIAL.
-
-6. Aceptar equivalencias semánticas y funcionales:
-   - Vidrio Espejo ≈ Cristal Espejo
-   - Reloj De Cuenta Vuelta ≈ Cuenta Revoluciones ≈ Tacómetro
-   - Soporte De Espejo ≈ Tirante De Sujeción De Espejo Retrovisor
-   - Bomba Dosificadora De Adblue ≈ Válvula Dosificadora De Urea (AdBlue ≈ UREA)
-   - Manija De Cierre Trincado ≈ Manija Cierre Cincado
-   - Palanca Multifuncion ≈ Palanca Multi Funcion
-   - Tambor De Arranque ≠ Motor De Arranque (son piezas distintas)
-
-7. Para materiales huérfanos (sin tarea correspondiente):
-   - Ignorar insumos de ferretería (tornillos, tuercas, arandelas, precintos, cinta, etc.)
-   - Verificar si ALGUNA tarea de la OM justifica ese material
-
-8. Prevención de falsos positivos - antes de marcar FALTA MATERIAL preguntate:
-   1. ¿La tarea realmente obliga a consumir un material?
-   2. ¿Identifiqué correctamente el objeto de la acción?
-   3. ¿Estoy confundiendo sistema/ubicación con el repuesto?
-   4. ¿Existe algún material equivalente aunque tenga otro nombre?
-   5. ¿Existe una abreviatura o denominación SAP diferente?
-   6. ¿El material puede ser un conjunto/subconjunto equivalente?
-   7. ¿Analicé TODOS los materiales de la OM?
-   8. ¿Lo estoy rechazando solo porque no coincide literalmente?
-   9. ¿La tarea es reparación/ajuste/regulación y podría no requerir repuesto?
-
-Respondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdown. Exactamente este formato:
-{
-  "tareas": [
-    {
-      "tarea": "texto original de la tarea",
-      "resultado": "OK" o "FALTA MATERIAL",
-      "requiere_material": true/false,
-      "accion": "CAMBIAR/COLOCAR/ENGRASE/AGREGAR/REPARAR/etc",
-      "objeto_principal": "qué se cambió",
-      "sistema": "dónde/contexto",
-      "material_encontrado": true/false,
-      "descripcion_material": "descripción del material encontrado o null",
-      "tipo_coincidencia": "exacta/sinonimo/equivalencia_semantica/denominacion_comercial/sin_coincidencia",
-      "confianza": 0.0-1.0,
-      "justificacion": "explicación breve en español"
-    }
-  ],
-  "materiales_huerfanos": [
-    {
-      "descripcion": "descripción del material",
-      "resultado": "SIN TAREA" o "JUSTIFICADO",
-      "tarea_relacionada": "texto de la tarea que lo justifica o null",
-      "confianza": 0.0-1.0,
-      "justificacion": "explicación breve"
-    }
-  ]
-}`;
+Campos tarea: tarea, resultado(OK|FALTA MATERIAL), requiere_material(bool), accion, objeto_principal, sistema, material_encontrado(bool), descripcion_material, tipo_coincidencia(exacta|sinonimo|equivalencia|sin_coincidencia), confianza(0-1), justificacion
+Campos material: descripcion, resultado(SIN TAREA|JUSTIFICADO), tarea_relacionada, confianza(0-1), justificacion`;
 
 export function buildOMAuditPayload(
   om: string,
@@ -184,7 +125,6 @@ export async function runAIAudit(params: {
 }): Promise<AuditResult[]> {
   const { pendingTasks, ordersToAudit, matByOrder, dfTar, aiConfig, onProgress } = params;
   
-  const uniqueOms = ordersToAudit;
   const auditResults: AuditResult[] = [];
 
   const pendingByOM = new Map<string, PendingAITask[]>();
@@ -193,93 +133,207 @@ export async function runAIAudit(params: {
     pendingByOM.get(pt.orderStr)!.push(pt);
   }
 
-  for (let i = 0; i < uniqueOms.length; i++) {
-    const omStr = uniqueOms[i];
-    const materialesOM = matByOrder[omStr] || [];
+  // Agrupar órdenes en lotes de 5 para reducir llamadas a la IA
+  const BATCH_SIZE = 5;
+  const batches: string[][] = [];
+  for (let i = 0; i < ordersToAudit.length; i += BATCH_SIZE) {
+    batches.push(ordersToAudit.slice(i, i + BATCH_SIZE));
+  }
 
-    const ordTasks = dfTar.filter(t => String(t['Nro. Orden']) === omStr);
-    const equipo = ordTasks.length > 0 ? String(ordTasks[0]['Codigo equipo'] || '') : '';
-    const modelo = ordTasks.length > 0 ? String(ordTasks[0]['Nombre Equipo'] || '') : '';
+  let processedCount = 0;
 
-    const allTareas = ordTasks
-      .map(t => ({ tarea: String(t['Tarea'] || ''), estado: String(t['Estado'] || '') }))
-      .filter(t => t.tarea);
+  for (const batch of batches) {
+    // Construir payload con múltiples órdenes
+    const batchPayload: Array<{
+      om: string;
+      equipo: string;
+      modelo: string;
+      tareas: { tarea: string; estado: string }[];
+      materiales: { codigo: string; descripcion: string; salidas: number }[];
+    }> = [];
 
-    try {
-      const iaRes = await runAIAuditForOM({
-        om: omStr, equipo, modelo, tareas: allTareas, materiales: materialesOM, aiConfig,
+    for (const omStr of batch) {
+      const materialesOM = matByOrder[omStr] || [];
+      const ordTasks = dfTar.filter(t => String(t['Nro. Orden']) === omStr);
+      const equipo = ordTasks.length > 0 ? String(ordTasks[0]['Codigo equipo'] || '') : '';
+      const modelo = ordTasks.length > 0 ? String(ordTasks[0]['Nombre Equipo'] || '') : '';
+
+      const allTareas = ordTasks
+        .map(t => ({ tarea: String(t['Tarea'] || ''), estado: String(t['Estado'] || '') }))
+        .filter(t => t.tarea);
+
+      const filteredMaterials = materialesOM.filter(m => {
+        const desc = up(String(m['Desc. Artículo'] || ''));
+        const salidas = parseFloat(String(m['Salidas'] || '0'));
+        return desc && !isNaN(salidas) && salidas > 0 && !isInsumoOFerreteria(desc);
       });
 
-      const pendingForOM = pendingByOM.get(omStr) || [];
-      // If we don't have pending tasks for this OM, we can't get ordData from them, but we can just use empty
-      const firstPending = pendingForOM[0];
-      const ordData = firstPending?.ordData;
-
-      const baseOrdFields = ordData ? {
-        'Tipo de orden': ordData.tipoOrden || undefined,
-        'Centros de costos': ordData.centrosCostos || undefined,
-        'Estado Orden': ordData.estadoOrden || undefined,
-        'Contabilizada': ordData.contabilizada || undefined,
-        'Fecha de la orden': ordData.fechaOrden || undefined,
-        'Status de documento': ordData.statusDoc || undefined,
-      } : {};
-
-      // Procesar TODAS las tareas analizadas por la IA, no solo las pendientes
-      for (const tv of iaRes.tareas) {
-        const conf = parseFloat(String(tv?.confianza || '1'));
-        if (tv.resultado === 'FALTA MATERIAL' && conf >= 0.60) {
-          // Buscar datos de la tarea original
-          const originalTask = ordTasks.find(t => 
-            String(t['Tarea'] || '').toUpperCase().trim() === tv.tarea.toUpperCase().trim()
-          );
-          const pendingTask = pendingForOM.find(pt => 
-            pt.tarea.toUpperCase().trim() === tv.tarea.toUpperCase().trim()
-          );
-          
-          const isHighConf = conf >= 0.85;
-          auditResults.push({
-            'Nro. Orden': omStr,
-            'Equipo': pendingTask?.equipo || equipo,
-            'Nombre Equipo': pendingTask?.nombreEquipo || modelo,
-            'Tarea': tv.tarea,
-            'Estado Tarea': pendingTask?.estadoTarea || String(originalTask?.['Estado'] || ''),
-            'Tipo de Hallazgo': isHighConf ? '2) Falta material (IA)' : '2) Posible falta de material (IA - revisar)',
-            'Detalle': tv.justificacion || `Acción: ${tv.accion || '?'}, Objeto: ${tv.objeto_principal || '?'}`,
-            'Resultado IA': tv.resultado,
-            'Material Relacionado': tv.descripcion_material || '',
-            'Confianza IA': conf,
-            'Justificación IA': tv.justificacion || '',
-            ...baseOrdFields,
-          });
-        }
-      }
-
-      for (const mv of iaRes.materiales_huerfanos) {
-        const conf2 = parseFloat(String(mv?.confianza || '1'));
-        if (mv.resultado === 'SIN TAREA' && conf2 >= 0.60) {
-          auditResults.push({
-            'Nro. Orden': omStr,
-            'Equipo': equipo,
-            'Nombre Equipo': modelo,
-            'Tarea': 'Sin tarea asociada',
-            'Estado Tarea': 'Sin tarea',
-            'Tipo de Hallazgo': '4) Repuesto sin tarea (IA)',
-            'Detalle': mv.justificacion || `Material "${mv.descripcion}" sin tarea que lo justifique`,
-            'Resultado IA': mv.resultado,
-            'Material Relacionado': mv.descripcion || '',
-            'Confianza IA': conf2,
-            'Justificación IA': mv.justificacion || '',
-            ...baseOrdFields,
-          });
-        }
-      }
-    } catch (err) {
-      console.error(`[AI Audit] Error procesando OM ${omStr}:`, err);
+      batchPayload.push({
+        om: omStr,
+        equipo,
+        modelo,
+        tareas: allTareas,
+        materiales: filteredMaterials.map(m => ({
+          codigo: String(m['Artículo'] || ''),
+          descripcion: String(m['Desc. Artículo'] || ''),
+          salidas: parseFloat(String(m['Salidas'] || '0')),
+        })),
+      });
     }
 
-    if (onProgress) onProgress(i + 1, uniqueOms.length, omStr);
-    if (i < uniqueOms.length - 1) await delay(150);
+    // Una sola llamada para el lote
+    const prompt = `${AI_AUDIT_SYSTEM_PROMPT}\n\nLote de ${batch.length} OMs a auditar:\n${JSON.stringify(batchPayload, null, 2)}`;
+
+    try {
+      const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          temperature: 0.1,
+          max_tokens: 4000,
+          apiKey: aiConfig.apiKey,
+          model: aiConfig.model,
+          provider: aiConfig.provider,
+          baseUrl: aiConfig.baseUrl,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('[AI Audit] Error en lote:', data?.error);
+        continue;
+      }
+
+      const content = data?.choices?.[0]?.message?.content || '';
+      const parsed = parseBatchAIResponse(content);
+
+      // Procesar resultados del lote
+      for (const omResult of parsed) {
+        const omStr = omResult.om;
+        const pendingForOM = pendingByOM.get(omStr) || [];
+        const firstPending = pendingForOM[0];
+        const ordData = firstPending?.ordData;
+
+        const baseOrdFields = ordData ? {
+          'Tipo de orden': ordData.tipoOrden || undefined,
+          'Centros de costos': ordData.centrosCostos || undefined,
+          'Estado Orden': ordData.estadoOrden || undefined,
+          'Contabilizada': ordData.contabilizada || undefined,
+          'Fecha de la orden': ordData.fechaOrden || undefined,
+          'Status de documento': ordData.statusDoc || undefined,
+        } : {};
+
+        const ordTasks = dfTar.filter(t => String(t['Nro. Orden']) === omStr);
+        const equipo = ordTasks.length > 0 ? String(ordTasks[0]['Codigo equipo'] || '') : '';
+        const modelo = ordTasks.length > 0 ? String(ordTasks[0]['Nombre Equipo'] || '') : '';
+
+        for (const tv of (omResult.tareas || [])) {
+          const conf = parseFloat(String(tv?.confianza || '1'));
+          if (tv.resultado === 'FALTA MATERIAL' && conf >= 0.60) {
+            const originalTask = ordTasks.find(t => 
+              String(t['Tarea'] || '').toUpperCase().trim() === tv.tarea.toUpperCase().trim()
+            );
+            const pendingTask = pendingForOM.find(pt => 
+              pt.tarea.toUpperCase().trim() === tv.tarea.toUpperCase().trim()
+            );
+            
+            const isHighConf = conf >= 0.85;
+            auditResults.push({
+              'Nro. Orden': omStr,
+              'Equipo': pendingTask?.equipo || equipo,
+              'Nombre Equipo': pendingTask?.nombreEquipo || modelo,
+              'Tarea': tv.tarea,
+              'Estado Tarea': pendingTask?.estadoTarea || String(originalTask?.['Estado'] || ''),
+              'Tipo de Hallazgo': isHighConf ? '2) Falta material (IA)' : '2) Posible falta de material (IA - revisar)',
+              'Detalle': tv.justificacion || `Acción: ${tv.accion || '?'}, Objeto: ${tv.objeto_principal || '?'}`,
+              'Resultado IA': tv.resultado,
+              'Material Relacionado': tv.descripcion_material || '',
+              'Confianza IA': conf,
+              'Justificación IA': tv.justificacion || '',
+              ...baseOrdFields,
+            });
+          }
+        }
+
+        for (const mv of (omResult.materiales_huerfanos || [])) {
+          const conf2 = parseFloat(String(mv?.confianza || '1'));
+          if (mv.resultado === 'SIN TAREA' && conf2 >= 0.60) {
+            auditResults.push({
+              'Nro. Orden': omStr,
+              'Equipo': equipo,
+              'Nombre Equipo': modelo,
+              'Tarea': 'Sin tarea asociada',
+              'Estado Tarea': 'Sin tarea',
+              'Tipo de Hallazgo': '4) Repuesto sin tarea (IA)',
+              'Detalle': mv.justificacion || `Material "${mv.descripcion}" sin tarea que lo justifique`,
+              'Resultado IA': mv.resultado,
+              'Material Relacionado': mv.descripcion || '',
+              'Confianza IA': conf2,
+              'Justificación IA': mv.justificacion || '',
+              ...baseOrdFields,
+            });
+          }
+        }
+
+        processedCount++;
+        if (onProgress) onProgress(processedCount, ordersToAudit.length, omStr);
+      }
+
+    } catch (err) {
+      console.error('[AI Audit] Error procesando lote:', err);
+    }
+
+    // Delay entre lotes (no entre órdenes individuales)
+    if (batches.indexOf(batch) < batches.length - 1) {
+      await delay(300);
+    }
   }
 
   return auditResults;
+}
+
+// Parsear respuesta de múltiples OMs
+function parseBatchAIResponse(raw: string): Array<{
+  om: string;
+  tareas: AITaskVerdict[];
+  materiales_huerfanos: AIMaterialVerdict[];
+}> {
+  let content = (raw || '').trim();
+  content = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  content = content.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1');
+  
+  // Detectar si es array u objeto
+  const firstBracket = content.indexOf('[');
+  const firstBrace = content.indexOf('{');
+  const lastBracket = content.lastIndexOf(']');
+  const lastBrace = content.lastIndexOf('}');
+  
+  if (firstBracket !== -1 && lastBracket > firstBracket && (firstBracket < firstBrace || firstBrace === -1)) {
+    content = content.substring(firstBracket, lastBracket + 1);
+  } else if (firstBrace !== -1 && lastBrace > firstBrace) {
+    content = content.substring(firstBrace, lastBrace + 1);
+  }
+  
+  content = content.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  content = content.replace(/,\s*([\]}])/g, '$1');
+
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) {
+      return parsed.map(item => ({
+        om: String(item.om || ''),
+        tareas: Array.isArray(item.tareas) ? item.tareas : [],
+        materiales_huerfanos: Array.isArray(item.materiales_huerfanos) ? item.materiales_huerfanos : [],
+      }));
+    }
+    return [{
+      om: String(parsed.om || ''),
+      tareas: Array.isArray(parsed.tareas) ? parsed.tareas : [],
+      materiales_huerfanos: Array.isArray(parsed.materiales_huerfanos) ? parsed.materiales_huerfanos : [],
+    }];
+  } catch {
+    console.error('[AI Audit] Error parsing batch response');
+    return [];
+  }
 }

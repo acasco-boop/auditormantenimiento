@@ -44,7 +44,7 @@ export function isInsumoOFerreteria(textUp: string): boolean {
     'LIJA', 'HERRAMIENTA', 'PINTURA', 'SELLADOR', 'ALAMBRE', 'GRILLETE', 
     'PASADOR', 'ELECTRODO', 'SELLAR', 'TIE WRAP', 'ZIPTIE', 'PRECINTOS', 
     'BULONES', 'TORNILLOS', 'TUERCAS', 'ARANDELAS', 'ABRAZADERAS', 'SELLADORES', 
-    'MANGUITO', 'ORING', 'O-RING'
+    'MANGUITO', 'ORING', 'O-RING', 'SIKAFLEX', 'SILICONA'
   ];
   const cleanText = up(textUp);
   return keywords.some(kw => cleanText.includes(up(kw)));
@@ -706,14 +706,13 @@ export function runAudit(
     }
 
     const mats = matByOrder[orderStr] || [];
-    // Insumos: solo analizar cuando Salida=0 (no se excluyen completamente)
+    // Insumos/ferretería: NO se analizan en auditoría de materiales huérfanos
+    // Solo se analizan en el procesamiento de tareas cuando Salida=0
     const relevantMats = mats.filter(m => {
       const matDescUp = up(String(m['Desc. Artículo'] || ''));
       const salidas = parseFloat(String(m['Salidas'] || '0'));
-      // Incluir materiales que:
-      // 1. No son insumos y tienen salidas > 0, O
-      // 2. Son insumos y tienen salidas = 0 (para detectar hallazgo tipo 3)
-      return matDescUp && (isInsumoOFerreteria(matDescUp) ? salidas === 0 : salidas > 0);
+      // Solo incluir materiales que NO son insumos y tienen salidas > 0
+      return matDescUp && !isInsumoOFerreteria(matDescUp) && salidas > 0;
     });
 
     if (relevantMats.length === 0) return;
